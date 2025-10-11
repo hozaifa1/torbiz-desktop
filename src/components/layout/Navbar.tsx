@@ -7,7 +7,7 @@ export function Navbar() {
       <Link href="/" className="flex items-center justify-center">
         <span className="text-xl font-bold">Torbiz</span>
       </Link>
-      <nav className="ml-auto flex gap-4 sm:gap-6">
+      <nav className="ml-auto flex items-center gap-4 sm:gap-6">
         <Link
           href="/#features"
           className="text-sm font-medium hover:underline underline-offset-4"

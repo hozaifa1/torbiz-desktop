@@ -1,7 +1,12 @@
+"use client";
+
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/app/contexts/AuthContext";
 
 export function Navbar() {
+  const { user, logout } = useAuth();
+
   return (
     <header className="px-4 lg:px-6 h-16 flex items-center border-b">
       <Link href="/" className="flex items-center justify-center">
@@ -20,9 +25,13 @@ export function Navbar() {
         >
           Share GPU
         </Link>
-        <Link href="/auth">
-          <Button>Login</Button>
-        </Link>
+        {user ? (
+          <Button onClick={logout} variant="outline">Logout</Button>
+        ) : (
+          <Link href="/auth">
+            <Button>Login</Button>
+          </Link>
+        )}
       </nav>
     </header>
   );

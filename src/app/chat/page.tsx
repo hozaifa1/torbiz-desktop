@@ -1,3 +1,5 @@
+"use client"
+
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -10,9 +12,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { mockMessages } from "@/lib/mockData";
+import withAuth from "../withAuth"; // <-- IMPORT IT HERE
 
 // Main component for the chat page
-export default function ChatPage() {
+function ChatPage() {
   return (
     <div className="h-[calc(100vh-4rem)] flex">
       {/* Left Sidebar for Chat History */}
@@ -28,6 +31,9 @@ export default function ChatPage() {
   );
 }
 
+export default withAuth(ChatPage); // <-- WRAP THE COMPONENT
+
+// ... rest of the file remains the same
 // Component: Chat History Sidebar
 function ChatHistorySidebar() {
   return (
@@ -76,7 +82,7 @@ function MessageList() {
     <ScrollArea className="flex-1 p-4">
       <div className="space-y-6">
         {mockMessages.map((msg, index) => (
-          <Message key={index} role={msg.role} content={msg.content} />
+          <Message key={index} role={msg.role as "user" | "assistant"} content={msg.content} />
         ))}
       </div>
     </ScrollArea>

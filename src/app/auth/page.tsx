@@ -1,3 +1,5 @@
+"use client";
+
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -9,8 +11,20 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useAuth } from "../contexts/AuthContext";
+import { useState } from "react";
 
 export default function AuthPage() {
+  const { login } = useAuth();
+  const [email, setEmail] = useState("");
+
+  const handleLogin = () => {
+    // In a real app, you would validate the email and password
+    if (email) {
+      login(email);
+    }
+  };
+
   return (
     <div className="flex items-center justify-center min-h-[calc(100vh-4rem)]">
       <Card className="w-full max-w-sm">
@@ -23,7 +37,14 @@ export default function AuthPage() {
         <CardContent className="grid gap-4">
           <div className="grid gap-2">
             <Label htmlFor="email">Email</Label>
-            <Input id="email" type="email" placeholder="m@example.com" required />
+            <Input
+              id="email"
+              type="email"
+              placeholder="m@example.com"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+            />
           </div>
           <div className="grid gap-2">
             <Label htmlFor="password">Password</Label>
@@ -31,7 +52,9 @@ export default function AuthPage() {
           </div>
         </CardContent>
         <CardFooter>
-          <Button className="w-full">Sign in</Button>
+          <Button className="w-full" onClick={handleLogin}>
+            Sign in
+          </Button>
         </CardFooter>
       </Card>
     </div>

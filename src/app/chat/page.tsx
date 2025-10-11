@@ -85,7 +85,7 @@ function MessageList() {
 
 // Component: A Single Message Bubble
 interface MessageProps {
-  role: "user" | "assistant";
+  role:  "user" | "assistant";
   content: string;
 }
 

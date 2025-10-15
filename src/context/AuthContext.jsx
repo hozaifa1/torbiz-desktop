@@ -33,8 +33,8 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('authToken', response.data.token);
       localStorage.setItem('deviceToken', response.data.device_token);
       localStorage.setItem('username', response.data.username);
-      localStorage.setItem('profileImageUrl', response.data.profile_image_url);
-      setUser({ username: response.data.username, profileImageUrl: response.data.profile_image_url });
+      localStorage.setItem('profileImageUrl', response.data.profile_image);
+      setUser({ username: response.data.username, profileImageUrl: response.data.profile_image });
       return response.data;
     } catch (error) {
       console.error("Login API Call Failed:", error.response?.data || error.message);

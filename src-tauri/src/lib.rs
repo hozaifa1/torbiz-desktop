@@ -21,13 +21,35 @@ fn show_notification(app: tauri::AppHandle, title: String, body: String) {
 
 // ADD THIS: Command to start OAuth server
 #[tauri::command]
-async fn start_oauth_server(window: tauri::Window) -> Result<u16, String> {
-    tauri_plugin_oauth::start(move |url| {
-        // Send the OAuth redirect URL back to the frontend
-        let _ = window.emit("oauth_redirect", url);
+async fn start_oauth_server(app: tauri::AppHandle, window: tauri::Window) -> Result<u16, String> {
+    println!("=== START_OAUTH_SERVER CALLED ===");
+    
+    // Test notification
+    app.notification()
+        .builder()
+        .title("OAuth Starting")
+        .body("Starting OAuth server...")
+        .show()
+        .ok();
+    
+    let result = tauri_plugin_oauth::start(move |url| {
+        println!("OAuth redirect received: {}", url);
+        if let Err(e) = window.emit("oauth_redirect", url) {
+            eprintln!("Failed to emit oauth_redirect event: {:?}", e);
+        }
     })
-    .map_err(|err| err.to_string())
+    .map_err(|err| {
+        eprintln!("Failed to start OAuth server: {:?}", err);
+        err.to_string()
+    });
+    
+    if let Ok(port) = &result {
+        println!("OAuth server started on port: {}", port);
+    }
+    
+    result
 }
+
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

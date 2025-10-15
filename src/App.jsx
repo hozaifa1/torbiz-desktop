@@ -16,8 +16,16 @@ function AppRoutes() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh',
+        flexDirection: 'column',
+        gap: '1rem'
+      }}>
         <h2>Loading Application...</h2>
+        <p style={{ color: '#666' }}>Please wait while we initialize...</p>
       </div>
     );
   }
@@ -40,8 +48,34 @@ function AppRoutes() {
 
 // The main App component now sets up all providers
 function App() {
+  // Verify Google Client ID is loaded
+  if (!googleClientId) {
+    console.error('Google Client ID is not configured in .env file');
+    return (
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh',
+        flexDirection: 'column',
+        gap: '1rem',
+        padding: '2rem',
+        textAlign: 'center'
+      }}>
+        <h2>Configuration Error</h2>
+        <p style={{ color: '#d93025' }}>
+          Google Client ID is missing. Please check your .env file.
+        </p>
+      </div>
+    );
+  }
+
   return (
-    <GoogleOAuthProvider clientId={googleClientId}>
+    <GoogleOAuthProvider 
+      clientId={googleClientId}
+      onScriptLoadError={() => console.error('Failed to load Google OAuth script')}
+      onScriptLoadSuccess={() => console.log('Google OAuth script loaded successfully')}
+    >
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <AppRoutes />

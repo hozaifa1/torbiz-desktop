@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "torbiz-desktop",
+  "productName": "Torbiz",
   "version": "0.1.0",
-  "identifier": "torbiz",
+  "identifier": "com.torbiz.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -12,22 +12,23 @@
   "app": {
     "windows": [
       {
-        "title": "torbiz-desktop",
-        "width": 800,
-        "height": 600
+        "title": "Torbiz - Decentralized AI Chat",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "center": true
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self' tauri: http://ipc.localhost; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://accounts.google.com https://apis.google.com blob:; style-src 'self' 'unsafe-inline' https://accounts.google.com; img-src 'self' data: https: http: blob:; font-src 'self' data:; connect-src 'self' tauri: http://ipc.localhost https://accounts.google.com https://torbiz-backend.vercel.app https://oauth2.googleapis.com http://localhost:*; frame-src https://accounts.google.com; worker-src 'self' blob:;"
     }
   },
-
   "plugins": {
     "shell": {
       "open": true
     }
   },
-
   "bundle": {
     "active": true,
     "targets": "all",
@@ -37,6 +38,7 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "publisher": "Torbiz Team"
   }
 }

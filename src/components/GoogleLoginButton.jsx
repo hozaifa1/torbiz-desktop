@@ -8,42 +8,18 @@ function GoogleLoginButton() {
   const [loading, setLoading] = useState(false);
   const [isTauri, setIsTauri] = useState(false);
   const [tauriApis, setTauriApis] = useState(null);
-  const [error, setError] = useState(null);
 
   // Detect if running in Tauri
   useEffect(() => {
     const checkTauri = async () => {
       const inTauri = isTauriEnvironment();
-      console.log('Tauri detected:', inTauri);
       setIsTauri(inTauri);
       
       if (inTauri) {
         try {
           const apis = await loadTauriApis();
-          
-          // Detailed logging
-          console.log('Tauri APIs loaded successfully');
-          console.log('Available API methods:', Object.keys(apis));
-          console.log('API types:', {
-            invoke: typeof apis.invoke,
-            listen: typeof apis.listen,
-            open: typeof apis.open
-          });
-          
-          // Verify open function exists and is callable
-          if (typeof apis.open !== 'function') {
-            throw new Error(`open is not a function, it is: ${typeof apis.open}`);
-          }
-          
           setTauriApis(apis);
-          console.log('✅ All Tauri APIs ready, including open function');
         } catch (error) {
-          console.error('❌ Failed to load Tauri APIs:', error);
-          console.error('Error details:', {
-            message: error.message,
-            stack: error.stack
-          });
-          setError(`Failed to initialize Tauri APIs: ${error.message}`);
           setIsTauri(false);
         }
       }
@@ -60,38 +36,27 @@ function GoogleLoginButton() {
     
     const setupListener = async () => {
       try {
-        console.log('Setting up OAuth listener...');
-        
         unlisten = await tauriApis.listen('oauth_redirect', async (event) => {
           const url = event.payload;
-          console.log('OAuth redirect received:', url);
           
           try {
-            // Extract id_token from hash fragment
             const hash = new URL(url).hash.substring(1);
             const hashParams = new URLSearchParams(hash);
             const idToken = hashParams.get('id_token');
             
             if (idToken) {
-              console.log('ID token extracted successfully');
               await googleLogin(idToken);
             } else {
-              console.error('No id_token found in OAuth response');
-              console.error('Available params:', Array.from(hashParams.keys()));
               alert('Failed to get authentication token. Please try again.');
             }
           } catch (error) {
-            console.error('Error processing OAuth response:', error);
             alert('Failed to sign in with Google. Please try again.');
           } finally {
             setLoading(false);
           }
         });
-        
-        console.log('✅ OAuth listener setup successfully');
       } catch (error) {
-        console.error('❌ Failed to setup OAuth listener:', error);
-        setError(`Failed to setup OAuth listener: ${error.message}`);
+        // Silent fail - listener setup is internal
       }
     };
 
@@ -100,51 +65,29 @@ function GoogleLoginButton() {
     return () => {
       if (unlisten) {
         unlisten();
-        console.log('OAuth listener cleaned up');
       }
     };
   }, [googleLogin, isTauri, tauriApis]);
 
   // Tauri Google Login Handler
   const handleTauriGoogleLogin = async () => {
-    console.log('Google login button clicked');
-    console.log('Current state:', {
-      tauriApis: !!tauriApis,
-      hasOpen: tauriApis ? typeof tauriApis.open : 'N/A',
-      loading
-    });
-    
     if (!tauriApis) {
-      console.error('❌ Tauri APIs not loaded yet');
       alert('Application is still initializing. Please wait a moment and try again.');
       return;
     }
 
-    if (typeof tauriApis.open !== 'function') {
-      console.error('❌ Open function not available');
-      console.error('tauriApis contents:', tauriApis);
-      console.error('open type:', typeof tauriApis.open);
-      alert('Browser opening functionality is not available. Please check the console for details.');
-      return;
-    }
-
     setLoading(true);
-    setError(null);
     
     try {
-      console.log('🚀 Starting OAuth flow...');
-      
-      // Start the OAuth server
-      console.log('Invoking start_oauth_server...');
+      // Start the OAuth server with a fixed port
       const port = await tauriApis.invoke('start_oauth_server');
-      console.log('✅ OAuth server started on port:', port);
       
-      // Build Google OAuth URL with implicit flow
+      // Build Google OAuth URL
       const redirectUri = `http://localhost:${port}/`;
       const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
       
       if (!clientId) {
-        throw new Error('Google Client ID not configured in environment variables');
+        throw new Error('Google Client ID not configured');
       }
       
       const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
@@ -154,25 +97,10 @@ function GoogleLoginButton() {
       authUrl.searchParams.set('scope', 'openid profile email');
       authUrl.searchParams.set('nonce', Math.random().toString(36));
       
-      const authUrlString = authUrl.toString();
-      console.log('📱 Opening OAuth URL in system browser');
-      console.log('URL:', authUrlString.substring(0, 100) + '...');
-      
       // Open in system browser
-      console.log('Calling tauriApis.open()...');
-      await tauriApis.open(authUrlString);
-      
-      console.log('✅ System browser opened successfully');
-      console.log('⏳ Waiting for OAuth redirect...');
+      await tauriApis.open(authUrl.toString());
     } catch (error) {
-      console.error('❌ Failed to start OAuth flow:', error);
-      console.error('Error type:', error.constructor.name);
-      console.error('Error message:', error.message);
-      console.error('Error stack:', error.stack);
-      
-      const errorMessage = error.message || 'Unknown error occurred';
-      alert(`Failed to start Google sign-in: ${errorMessage}`);
-      setError(errorMessage);
+      alert(`Failed to start Google sign-in: ${error.message || 'Unknown error'}`);
       setLoading(false);
     }
   };
@@ -181,21 +109,15 @@ function GoogleLoginButton() {
   const handleWebGoogleLogin = async (credentialResponse) => {
     try {
       setLoading(true);
-      setError(null);
-      console.log('Web Google login initiated');
       await googleLogin(credentialResponse.credential);
-      console.log('Web Google login successful');
     } catch (error) {
-      console.error('Web Google login failed:', error);
       alert('Failed to sign in with Google. Please try again.');
-      setError(error.message);
     } finally {
       setLoading(false);
     }
   };
 
   const handleError = () => {
-    console.error('Google Login Failed or Cancelled');
     alert('Google sign-in was cancelled or failed. Please try again.');
   };
 
@@ -230,21 +152,11 @@ function GoogleLoginButton() {
           </svg>
           {!tauriApis ? 'Loading...' : (loading ? 'Signing in...' : 'Sign in with Google')}
         </button>
-        {error && (
-          <p style={{ color: '#d93025', fontSize: '0.85em', marginTop: '0.5rem', textAlign: 'center' }}>
-            {error}
-          </p>
-        )}
-        {!tauriApis && !error && (
-          <p style={{ color: '#666', fontSize: '0.85em', marginTop: '0.5rem', textAlign: 'center' }}>
-            Initializing authentication...
-          </p>
-        )}
       </div>
     );
   }
 
-  // Render web version with proper configuration
+  // Render web version
   return (
     <div style={{ display: 'flex', justifyContent: 'center' }}>
       <GoogleLogin

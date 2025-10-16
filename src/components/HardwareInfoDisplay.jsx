@@ -40,12 +40,6 @@ function HardwareInfoDisplay() {
     return null;
   }
 
-  // Check if GPU is detected
-  const hasGPU = hardwareInfo.gpu_info && 
-                 hardwareInfo.gpu_info.length > 0 && 
-                 !hardwareInfo.gpu_info[0].includes('No dedicated GPU') &&
-                 !hardwareInfo.gpu_info[0].includes('GPU detection failed');
-
   return (
     <div style={{
       padding: '0.75rem',
@@ -109,28 +103,15 @@ function HardwareInfoDisplay() {
             <Monitor size={14} style={{ marginTop: '2px', flexShrink: 0 }} />
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: '500' }}>GPU</div>
-              {hasGPU ? (
-                hardwareInfo.gpu_info.map((gpu, index) => (
-                  <div key={index} style={{ 
-                    fontSize: '0.85em', 
-                    wordBreak: 'break-word',
-                    marginTop: index > 0 ? '4px' : '0',
-                  }}>
-                    {gpu}
-                  </div>
-                ))
-              ) : (
-                <div style={{ 
+              {hardwareInfo.gpu_info.map((gpu, index) => (
+                <div key={index} style={{ 
                   fontSize: '0.85em', 
-                  color: '#888',
-                  fontStyle: 'italic'
+                  wordBreak: 'break-word',
+                  marginTop: index > 0 ? '4px' : '0',
                 }}>
-                  No dedicated GPU detected
-                  <div style={{ fontSize: '0.9em', marginTop: '2px' }}>
-                    (Integrated graphics only)
-                  </div>
+                  {gpu}
                 </div>
-              )}
+              ))}
             </div>
           </div>
 

@@ -1,12 +1,10 @@
 // Service for collecting and sending hardware information
 import { isTauriEnvironment } from './tauriHelpers';
+import api from '../services/api';
 
-// Configuration - Update this when backend is ready
+// Configuration
 const HARDWARE_API_CONFIG = {
-  // Set this to your backend API endpoint when ready
-  endpoint: 'http://torbiz-backend.vercel.app/gpu/list/',
-  
-  // For testing, set this to true to log to console instead of sending
+  endpoint: '/gpu/list/', // Using your actual backend endpoint
   testingMode: false,
 };
 
@@ -20,7 +18,7 @@ export async function getHardwareInfo() {
       cpu_name: 'Web Browser',
       cpu_cores: navigator.hardwareConcurrency || 0,
       cpu_frequency: 0,
-      total_memory: navigator.deviceMemory ? navigator.deviceMemory * 1024 : 0, // Convert GB to MB
+      total_memory: navigator.deviceMemory ? navigator.deviceMemory * 1024 : 0,
       total_swap: 0,
       os_name: navigator.platform,
       os_version: navigator.userAgent,
@@ -45,7 +43,6 @@ async function getWebGPUInfo() {
   const gpuInfo = [];
   
   try {
-    // Try WebGL
     const canvas = document.createElement('canvas');
     const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
     
@@ -69,56 +66,48 @@ async function getWebGPUInfo() {
 
 /**
  * Send hardware information to backend
+ * Backend expects: gpu_info, cpu_name, cpu_core, cpu_frequency, total_memory, total_swap, ram, os_name, os_version, user
  */
 export async function sendHardwareInfoToBackend(hardwareInfo, authToken = null) {
-  if (!isTauriEnvironment()) {
-    // In web environment, use fetch
-    if (HARDWARE_API_CONFIG.testingMode) {
-      console.log('=== HARDWARE INFO (Testing Mode) ===');
-      console.log(JSON.stringify(hardwareInfo, null, 2));
-      console.log('=====================================');
-      return { success: true, message: 'Testing mode - logged to console' };
-    }
-
-    try {
-      const response = await fetch(HARDWARE_API_CONFIG.endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(authToken && { 'Authorization': `Token ${authToken}` }),
-        },
-        body: JSON.stringify(hardwareInfo),
-      });
-
-      if (response.ok) {
-        return { success: true, message: 'Hardware info sent successfully' };
-      } else {
-        throw new Error(`Server returned status: ${response.status}`);
-      }
-    } catch (error) {
-      console.error('Failed to send hardware info:', error);
-      throw error;
-    }
+  if (HARDWARE_API_CONFIG.testingMode) {
+    console.log('=== HARDWARE INFO (Testing Mode) ===');
+    console.log(JSON.stringify(hardwareInfo, null, 2));
+    console.log('=====================================');
+    return { success: true, message: 'Testing mode - logged to console' };
   }
 
-  // Tauri environment
   try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    
-    const endpoint = HARDWARE_API_CONFIG.testingMode 
-      ? 'http://localhost:9999/test' // Fake endpoint for testing
-      : HARDWARE_API_CONFIG.endpoint;
+    // Transform data to match backend schema
+    const payload = {
+      gpu_info: Array.isArray(hardwareInfo.gpu_info) 
+        ? hardwareInfo.gpu_info.join(', ') 
+        : String(hardwareInfo.gpu_info || 'Unknown GPU'),
+      cpu_name: String(hardwareInfo.cpu_name || 'Unknown CPU'),
+      cpu_core: String(hardwareInfo.cpu_cores || 0),
+      cpu_frequency: String(hardwareInfo.cpu_frequency || 0),
+      total_memory: String(hardwareInfo.total_memory || 0),
+      total_swap: String(hardwareInfo.total_swap || 0),
+      ram: String(hardwareInfo.total_memory || 0), // Backend has separate 'ram' field
+      os_name: String(hardwareInfo.os_name || 'Unknown OS'),
+      os_version: String(hardwareInfo.os_version || 'Unknown'),
+      // user field will be automatically filled by backend from auth token
+    };
 
-    const result = await invoke('send_hardware_info_to_backend', {
-      hardwareInfo,
-      backendUrl: endpoint,
-      authToken,
-    });
+    console.log('Sending hardware info to backend:', payload);
 
-    return { success: true, message: result };
+    // Use the api instance which already has auth token in headers
+    const response = await api.post(HARDWARE_API_CONFIG.endpoint, payload);
+
+    console.log('Hardware info sent successfully:', response.data);
+    return { success: true, message: 'Hardware info sent successfully', data: response.data };
   } catch (error) {
-    console.error('Failed to send hardware info:', error);
-    throw error;
+    console.error('Failed to send hardware info:', error.response?.data || error.message);
+    
+    // Don't throw error - we don't want to block login if hardware info fails
+    return { 
+      success: false, 
+      message: error.response?.data?.detail || error.message || 'Failed to send hardware info'
+    };
   }
 }
 
@@ -132,13 +121,13 @@ export async function collectAndSendHardwareInfo(authToken = null) {
     return result;
   } catch (error) {
     console.error('Error in collectAndSendHardwareInfo:', error);
-    throw error;
+    // Don't throw - just return error result
+    return { success: false, message: error.message };
   }
 }
 
 /**
  * Update the API configuration
- * Call this function when you want to switch from testing mode to production
  */
 export function configureHardwareAPI(endpoint, testingMode = false) {
   HARDWARE_API_CONFIG.endpoint = endpoint;

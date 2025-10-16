@@ -7,10 +7,33 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Dependency directories
+node_modules/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Optional npm cache directory
+.npm
+
+# dotenv environment variables file
+.env
+.env*.local
+
+# Tauri build artifacts and generated files
+src-tauri/target/
+src-tauri/gen/
+src-tauri/Cargo.lock  #<-- Re-evaluating. See below.
+
+# Build output
+dist/
+dist-ssr/
 
 # Editor directories and files
 .vscode/*

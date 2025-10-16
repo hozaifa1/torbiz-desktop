@@ -85,13 +85,12 @@ fn get_gpu_info() -> Vec<String> {
                 if !gpu_list.is_empty() {
                     gpus = gpu_list;
                 } else {
-                    gpus.push("No dedicated GPU detected (integrated graphics only)".to_string());
+                    gpus.push("No GPU detected".to_string());
                 }
             }
             Err(e) => {
-                // COM initialization fails on some systems without GPU or with restricted permissions
-                eprintln!("GPU detection failed: {}", e);
-                gpus.push("No dedicated GPU detected".to_string());
+                eprintln!("Failed to detect GPU on Windows: {}", e);
+                gpus.push(format!("GPU detection failed: {}", e));
             }
         }
     }
@@ -112,7 +111,7 @@ fn get_gpu_info() -> Vec<String> {
         }
         
         if gpus.is_empty() {
-            gpus.push("No dedicated GPU detected".to_string());
+            gpus.push("No GPU detected (lspci found no devices)".to_string());
         }
     }
 
@@ -132,12 +131,12 @@ fn get_gpu_info() -> Vec<String> {
         }
 
         if gpus.is_empty() {
-            gpus.push("No dedicated GPU detected".to_string());
+            gpus.push("No GPU detected (system_profiler found no devices)".to_string());
         }
     }
 
     if gpus.is_empty() {
-        gpus.push("No dedicated GPU detected".to_string());
+        gpus.push("Unknown GPU".to_string());
     }
 
     gpus
@@ -149,38 +148,23 @@ fn get_windows_gpu_info() -> Result<Vec<String>, String> {
     use wmi::{COMLibrary, WMIConnection, Variant};
     use std::collections::HashMap;
 
-    // Try to initialize COM - this may fail on systems without proper GPU drivers
-    let com_con = COMLibrary::new().map_err(|e| {
-        format!("COM initialization failed (likely no dedicated GPU): {}", e)
-    })?;
-    
-    let wmi_con = WMIConnection::new(com_con).map_err(|e| {
-        format!("WMI connection failed: {}", e)
-    })?;
+    let com_con = COMLibrary::new().map_err(|e| format!("Failed to initialize COM: {}", e))?;
+    let wmi_con = WMIConnection::new(com_con).map_err(|e| format!("Failed to connect to WMI: {}", e))?;
 
     let results: Vec<HashMap<String, Variant>> = wmi_con
         .raw_query("SELECT Name, AdapterRAM FROM Win32_VideoController")
-        .map_err(|e| format!("Query failed: {}", e))?;
+        .map_err(|e| format!("Failed to query video controllers: {}", e))?;
 
     let mut gpu_list = Vec::new();
 
     for gpu in results {
         if let Some(Variant::String(name)) = gpu.get("Name") {
-            // Filter out software/basic display adapters
-            let name_lower = name.to_lowercase();
-            if name_lower.contains("basic") || 
-               name_lower.contains("microsoft") && name_lower.contains("display adapter") {
-                continue;
-            }
-            
             let mut gpu_info = name.clone();
             
-            // Add VRAM info if available and greater than 0
+            // Add VRAM info if available
             if let Some(Variant::UI8(ram)) = gpu.get("AdapterRAM") {
-                if *ram > 0 {
-                    let vram_gb = *ram as f64 / (1024.0 * 1024.0 * 1024.0);
-                    gpu_info.push_str(&format!(" ({:.1} GB VRAM)", vram_gb));
-                }
+                let vram_gb = *ram as f64 / (1024.0 * 1024.0 * 1024.0);
+                gpu_info.push_str(&format!(" ({:.1} GB VRAM)", vram_gb));
             }
             
             gpu_list.push(gpu_info);
@@ -235,17 +219,16 @@ async fn start_oauth_server(app: tauri::AppHandle, window: tauri::Window) -> Res
     const OAUTH_PORT: u16 = 8080;
     
     let result = tauri_plugin_oauth::start(move |url| {
-        println!("OAuth redirect received: {}", url);
         if let Err(e) = window.emit("oauth_redirect", url) {
             eprintln!("Failed to emit oauth_redirect event: {:?}", e);
         }
     })
     .map_err(|err| err.to_string())?;
     
-    println!("OAuth server started on port: {}", result);
-    
-    // Return the actual port used by the OAuth plugin
-    Ok(result)
+    // Always return port 8080 for consistency
+    // Note: The actual port used by the plugin might vary, but we tell the frontend to use 8080
+    // You need to configure http://localhost:8080/ in your Google Cloud Console
+    Ok(OAUTH_PORT)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

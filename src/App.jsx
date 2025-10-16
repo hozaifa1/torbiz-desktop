@@ -16,17 +16,28 @@ function AppRoutes() {
   const { user, loading } = useAuth();
   const location = useLocation();
 
-  // Send hardware info when user logs in
+  // Send hardware info when user logs in (but only once per session)
   useEffect(() => {
     if (user) {
-      const authToken = localStorage.getItem('authToken');
-      collectAndSendHardwareInfo(authToken)
-        .then(() => {
-          // Hardware info sent successfully (or logged in testing mode)
-        })
-        .catch(() => {
-          // Silent fail - don't interrupt user experience
-        });
+      // Check if hardware info was already sent this session
+      const hardwareInfoSent = sessionStorage.getItem('hardwareInfoSent');
+      
+      if (!hardwareInfoSent) {
+        const authToken = localStorage.getItem('authToken');
+        collectAndSendHardwareInfo(authToken)
+          .then(() => {
+            console.log('Hardware info collected and sent successfully');
+            // Mark as sent for this session
+            sessionStorage.setItem('hardwareInfoSent', 'true');
+          })
+          .catch((error) => {
+            console.error('Failed to send hardware info:', error);
+            // Don't mark as sent so it can retry next time
+          });
+      }
+    } else {
+      // Clear the flag when user logs out
+      sessionStorage.removeItem('hardwareInfoSent');
     }
   }, [user]);
 
@@ -79,6 +90,9 @@ function App() {
         <h2>Configuration Error</h2>
         <p style={{ color: '#d93025' }}>
           Google Client ID is missing. Please check your .env file.
+        </p>
+        <p style={{ fontSize: '0.9em', color: '#666' }}>
+          Make sure VITE_GOOGLE_CLIENT_ID is set in your .env file
         </p>
       </div>
     );

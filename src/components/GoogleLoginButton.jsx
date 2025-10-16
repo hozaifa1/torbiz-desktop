@@ -3,6 +3,9 @@ import { GoogleLogin } from '@react-oauth/google';
 import { useAuth } from '../context/AuthContext';
 import { isTauriEnvironment, loadTauriApis } from '../utils/tauriHelpers';
 
+// FIXED: Use constant port 8080 for OAuth
+const OAUTH_PORT = 8080;
+
 function GoogleLoginButton() {
   const { googleLogin } = useAuth();
   const [loading, setLoading] = useState(false);
@@ -20,7 +23,6 @@ function GoogleLoginButton() {
           const apis = await loadTauriApis();
           setTauriApis(apis);
         } catch (error) {
-          console.error('Failed to load Tauri APIs:', error);
           setIsTauri(false);
         }
       }
@@ -38,43 +40,26 @@ function GoogleLoginButton() {
     const setupListener = async () => {
       try {
         unlisten = await tauriApis.listen('oauth_redirect', async (event) => {
-          console.log('OAuth redirect event received:', event.payload);
           const url = event.payload;
           
           try {
-            // Parse the URL - Google returns data in hash fragment
-            const urlObj = new URL(url);
-            const hash = urlObj.hash.substring(1); // Remove the leading #
+            const hash = new URL(url).hash.substring(1);
             const hashParams = new URLSearchParams(hash);
-            
             const idToken = hashParams.get('id_token');
-            const accessToken = hashParams.get('access_token');
-            
-            console.log('Extracted tokens:', { 
-              hasIdToken: !!idToken, 
-              hasAccessToken: !!accessToken 
-            });
             
             if (idToken) {
-              console.log('Attempting login with ID token');
               await googleLogin(idToken);
-              console.log('Google login successful');
             } else {
-              console.error('No id_token in OAuth response');
-              alert('Failed to get authentication token from Google. Please try again.');
+              alert('Failed to get authentication token. Please try again.');
             }
           } catch (error) {
-            console.error('Error processing OAuth redirect:', error);
             alert('Failed to sign in with Google. Please try again.');
           } finally {
             setLoading(false);
           }
         });
-        
-        console.log('OAuth listener setup complete');
       } catch (error) {
-        console.error('Failed to setup OAuth listener:', error);
-        setLoading(false);
+        // Silent fail - listener setup is internal
       }
     };
 
@@ -97,35 +82,27 @@ function GoogleLoginButton() {
     setLoading(true);
     
     try {
-      console.log('Starting OAuth server...');
-      // Start the OAuth server
-      const port = await tauriApis.invoke('start_oauth_server');
-      console.log('OAuth server started on port:', port);
+      // Start the OAuth server - will use fixed port 8080
+      await tauriApis.invoke('start_oauth_server');
       
-      // Build Google OAuth URL
-      const redirectUri = `http://localhost:${port}/`;
+      // Build Google OAuth URL with fixed port 8080
+      const redirectUri = `http://localhost:${OAUTH_PORT}/`;
       const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
       
       if (!clientId) {
         throw new Error('Google Client ID not configured');
       }
       
-      console.log('Building OAuth URL with redirect:', redirectUri);
-      
       const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
       authUrl.searchParams.set('client_id', clientId);
       authUrl.searchParams.set('redirect_uri', redirectUri);
       authUrl.searchParams.set('response_type', 'id_token token');
       authUrl.searchParams.set('scope', 'openid profile email');
-      authUrl.searchParams.set('nonce', Math.random().toString(36).substring(2));
+      authUrl.searchParams.set('nonce', Math.random().toString(36));
       
-      console.log('Opening browser with OAuth URL');
       // Open in system browser
       await tauriApis.open(authUrl.toString());
-      
-      console.log('Browser opened, waiting for callback...');
     } catch (error) {
-      console.error('Failed to start Google sign-in:', error);
       alert(`Failed to start Google sign-in: ${error.message || 'Unknown error'}`);
       setLoading(false);
     }
@@ -135,10 +112,8 @@ function GoogleLoginButton() {
   const handleWebGoogleLogin = async (credentialResponse) => {
     try {
       setLoading(true);
-      console.log('Web Google login - credential received');
       await googleLogin(credentialResponse.credential);
     } catch (error) {
-      console.error('Web Google login failed:', error);
       alert('Failed to sign in with Google. Please try again.');
     } finally {
       setLoading(false);
@@ -146,9 +121,7 @@ function GoogleLoginButton() {
   };
 
   const handleError = () => {
-    console.error('Google sign-in error or cancelled');
     alert('Google sign-in was cancelled or failed. Please try again.');
-    setLoading(false);
   };
 
   // Render Tauri button
@@ -182,6 +155,18 @@ function GoogleLoginButton() {
           </svg>
           {!tauriApis ? 'Loading...' : (loading ? 'Signing in...' : 'Sign in with Google')}
         </button>
+        
+        {/* Important note for developers */}
+        {process.env.NODE_ENV === 'development' && (
+          <div style={{ 
+            marginTop: '8px', 
+            fontSize: '0.75em', 
+            color: '#666',
+            textAlign: 'center'
+          }}>
+            Note: Add http://localhost:8080/ to Google Console
+          </div>
+        )}
       </div>
     );
   }

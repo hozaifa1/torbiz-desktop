@@ -127,7 +127,7 @@ function ChatPage() {
           </button>
         </div>
         {/* {process.env.NODE_ENV === 'development' && <HardwareInfoTest />} */}
-        {<HardwareInfoTest />}
+        {/* {<HardwareInfoTest />} */}
       </main>
     </div>
   );

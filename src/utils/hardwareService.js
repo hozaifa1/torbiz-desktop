@@ -4,10 +4,10 @@ import { isTauriEnvironment } from './tauriHelpers';
 // Configuration - Update this when backend is ready
 const HARDWARE_API_CONFIG = {
   // Set this to your backend API endpoint when ready
-  endpoint: 'https://your-backend-api.com/api/hardware-info',
+  endpoint: 'http://torbiz-backend.vercel.app/gpu/list/',
   
   // For testing, set this to true to log to console instead of sending
-  testingMode: true,
+  testingMode: false,
 };
 
 /**

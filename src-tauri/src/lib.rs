@@ -79,14 +79,26 @@ fn get_gpu_info() -> Vec<String> {
 
     #[cfg(target_os = "windows")]
     {
-        // Windows: Use WMI or registry
-        // For now, return a placeholder
-        gpus.push("GPU detection on Windows (implement via WMI)".to_string());
+        // Windows: Use WMI to query video controllers
+        match get_windows_gpu_info() {
+            Ok(gpu_list) => {
+                if !gpu_list.is_empty() {
+                    gpus = gpu_list;
+                } else {
+                    gpus.push("No dedicated GPU detected (integrated graphics only)".to_string());
+                }
+            }
+            Err(e) => {
+                // COM initialization fails on some systems without GPU or with restricted permissions
+                eprintln!("GPU detection failed: {}", e);
+                gpus.push("No dedicated GPU detected".to_string());
+            }
+        }
     }
 
     #[cfg(target_os = "linux")]
     {
-        // Linux: Try to read from lspci or similar
+        // Linux: Try to read from lspci
         if let Ok(output) = std::process::Command::new("lspci")
             .arg("-v")
             .output() 
@@ -100,7 +112,7 @@ fn get_gpu_info() -> Vec<String> {
         }
         
         if gpus.is_empty() {
-            gpus.push("GPU detection on Linux (no lspci output)".to_string());
+            gpus.push("No dedicated GPU detected".to_string());
         }
     }
 
@@ -120,15 +132,62 @@ fn get_gpu_info() -> Vec<String> {
         }
 
         if gpus.is_empty() {
-            gpus.push("GPU detection on macOS (no system_profiler output)".to_string());
+            gpus.push("No dedicated GPU detected".to_string());
         }
     }
 
     if gpus.is_empty() {
-        gpus.push("Unknown GPU".to_string());
+        gpus.push("No dedicated GPU detected".to_string());
     }
 
     gpus
+}
+
+// Windows-specific GPU detection using WMI
+#[cfg(target_os = "windows")]
+fn get_windows_gpu_info() -> Result<Vec<String>, String> {
+    use wmi::{COMLibrary, WMIConnection, Variant};
+    use std::collections::HashMap;
+
+    // Try to initialize COM - this may fail on systems without proper GPU drivers
+    let com_con = COMLibrary::new().map_err(|e| {
+        format!("COM initialization failed (likely no dedicated GPU): {}", e)
+    })?;
+    
+    let wmi_con = WMIConnection::new(com_con).map_err(|e| {
+        format!("WMI connection failed: {}", e)
+    })?;
+
+    let results: Vec<HashMap<String, Variant>> = wmi_con
+        .raw_query("SELECT Name, AdapterRAM FROM Win32_VideoController")
+        .map_err(|e| format!("Query failed: {}", e))?;
+
+    let mut gpu_list = Vec::new();
+
+    for gpu in results {
+        if let Some(Variant::String(name)) = gpu.get("Name") {
+            // Filter out software/basic display adapters
+            let name_lower = name.to_lowercase();
+            if name_lower.contains("basic") || 
+               name_lower.contains("microsoft") && name_lower.contains("display adapter") {
+                continue;
+            }
+            
+            let mut gpu_info = name.clone();
+            
+            // Add VRAM info if available and greater than 0
+            if let Some(Variant::UI8(ram)) = gpu.get("AdapterRAM") {
+                if *ram > 0 {
+                    let vram_gb = *ram as f64 / (1024.0 * 1024.0 * 1024.0);
+                    gpu_info.push_str(&format!(" ({:.1} GB VRAM)", vram_gb));
+                }
+            }
+            
+            gpu_list.push(gpu_info);
+        }
+    }
+
+    Ok(gpu_list)
 }
 
 // Send hardware info to backend
@@ -169,35 +228,23 @@ async fn send_hardware_info_to_backend(
     }
 }
 
-// OAuth server with specific port range (8080-8090)
-// This makes it easier to configure redirect URIs in Google Cloud Console
+// FIXED: OAuth server with FIXED port 8080
 #[tauri::command]
 async fn start_oauth_server(app: tauri::AppHandle, window: tauri::Window) -> Result<u16, String> {
-    // Try ports 8080-8090
-    for port in 8080..=8090 {
-        match try_start_oauth_on_port(app.clone(), window.clone(), port).await {
-            Ok(p) => return Ok(p),
-            Err(_) => continue,
-        }
-    }
+    // Use fixed port 8080 for consistent redirect URI
+    const OAUTH_PORT: u16 = 8080;
     
-    Err("Could not start OAuth server on any port between 8080-8090".to_string())
-}
-
-async fn try_start_oauth_on_port(
-    app: tauri::AppHandle,
-    window: tauri::Window,
-    port: u16,
-) -> Result<u16, String> {
-    // Note: tauri_plugin_oauth::start doesn't support custom ports directly
-    // So we'll use the default behavior and document the ports needed
     let result = tauri_plugin_oauth::start(move |url| {
+        println!("OAuth redirect received: {}", url);
         if let Err(e) = window.emit("oauth_redirect", url) {
             eprintln!("Failed to emit oauth_redirect event: {:?}", e);
         }
     })
     .map_err(|err| err.to_string())?;
     
+    println!("OAuth server started on port: {}", result);
+    
+    // Return the actual port used by the OAuth plugin
     Ok(result)
 }
 

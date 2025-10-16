@@ -1,12 +1,11 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { invoke } from '@tauri-apps/api/core';
 import { 
     ChevronLeft, ChevronRight, Share2, ChevronDown, 
     MessageSquarePlus, Paperclip, SendHorizontal 
 } from 'lucide-react';
 
-import HardwareInfoTest from '../components/HardwareInfoTest';
+import HardwareInfoDisplay from '../components/HardwareInfoDisplay';
 
 // --- Placeholder Data ---
 const models = [
@@ -56,6 +55,9 @@ function ChatPage() {
             <li key={chat.id}>{chat.title}</li>
           ))}
         </ul>
+        
+        {/* Hardware Info Display at the bottom */}
+        <HardwareInfoDisplay />
       </aside>
 
       {/* Main Chat Area */}
@@ -126,8 +128,6 @@ function ChatPage() {
             <SendHorizontal size={20} />
           </button>
         </div>
-        {/* {process.env.NODE_ENV === 'development' && <HardwareInfoTest />} */}
-        {/* {<HardwareInfoTest />} */}
       </main>
     </div>
   );

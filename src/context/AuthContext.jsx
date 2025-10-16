@@ -15,17 +15,42 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Validate token on mount
   useEffect(() => {
-    const token = localStorage.getItem('authToken');
-    const username = localStorage.getItem('username');
-    const profileImageUrl = localStorage.getItem('profileImageUrl');
-    
-    if (token && username) {
-      console.log('Restoring user session:', username);
-      setUser({ username, profileImageUrl });
-    }
-    
-    setLoading(false);
+    const validateSession = async () => {
+      const token = localStorage.getItem('authToken');
+      const username = localStorage.getItem('username');
+      const profileImageUrl = localStorage.getItem('profileImageUrl');
+      
+      if (token && username) {
+        try {
+          // Verify token is still valid by making a test request
+          // This assumes your backend has an endpoint to verify tokens
+          // If not, we'll just check if the token exists and is formatted correctly
+          console.log('Validating existing session for:', username);
+          
+          // Try to make a simple API call to verify the token
+          // You can replace this with a specific /verify-token endpoint if available
+          await api.get('/client/list/'); // Adjust endpoint as needed
+          
+          // If successful, restore the session
+          console.log('Session validated successfully');
+          setUser({ username, profileImageUrl });
+        } catch (error) {
+          console.log('Session validation failed, clearing stored credentials');
+          // Token is invalid, clear everything
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('deviceToken');
+          localStorage.removeItem('username');
+          localStorage.removeItem('profileImageUrl');
+          setUser(null);
+        }
+      }
+      
+      setLoading(false);
+    };
+
+    validateSession();
   }, []);
 
   const login = async (email, password) => {

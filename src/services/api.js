@@ -18,4 +18,27 @@ api.interceptors.request.use(
   }
 );
 
+// Interceptor to handle 401 (Unauthorized) responses
+api.interceptors.response.use(
+  (response) => {
+    return response;
+  },
+  (error) => {
+    // If we get a 401, the token is invalid - clear storage
+    if (error.response && error.response.status === 401) {
+      console.log('Received 401 - Token is invalid, clearing session');
+      localStorage.removeItem('authToken');
+      localStorage.removeItem('deviceToken');
+      localStorage.removeItem('username');
+      localStorage.removeItem('profileImageUrl');
+      
+      // Redirect to auth page if not already there
+      if (!window.location.pathname.includes('/auth')) {
+        window.location.href = '/auth';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
 export default api;

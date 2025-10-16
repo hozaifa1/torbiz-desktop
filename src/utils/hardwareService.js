@@ -5,7 +5,7 @@ import api from '../services/api';
 // Configuration
 const HARDWARE_API_CONFIG = {
   endpoint: '/gpu/list/', // Using your actual backend endpoint
-  testingMode: false,
+  testingMode: true, // Set to true to log to console instead of sending to backend
 };
 
 /**
@@ -66,44 +66,42 @@ async function getWebGPUInfo() {
 
 /**
  * Send hardware information to backend
- * Backend expects: gpu_info, cpu_name, cpu_core, cpu_frequency, total_memory, total_swap, ram, os_name, os_version, user
+ * Now includes model_name
  */
-export async function sendHardwareInfoToBackend(hardwareInfo, authToken = null) {
+export async function sendHardwareInfoToBackend(hardwareInfo, modelName, authToken = null) {
+  // Transform data to match backend schema
+  const payload = {
+    model_name: modelName, // Add model name to payload
+    gpu_info: Array.isArray(hardwareInfo.gpu_info) 
+      ? hardwareInfo.gpu_info.join(', ') 
+      : String(hardwareInfo.gpu_info || 'Unknown GPU'),
+    cpu_name: String(hardwareInfo.cpu_name || 'Unknown CPU'),
+    cpu_core: String(hardwareInfo.cpu_cores || 0),
+    cpu_frequency: String(hardwareInfo.cpu_frequency || 0),
+    total_memory: String(hardwareInfo.total_memory || 0),
+    total_swap: String(hardwareInfo.total_swap || 0),
+    ram: String(hardwareInfo.total_memory || 0), // Backend has separate 'ram' field
+    os_name: String(hardwareInfo.os_name || 'Unknown OS'),
+    os_version: String(hardwareInfo.os_version || 'Unknown'),
+  };
+
   if (HARDWARE_API_CONFIG.testingMode) {
     console.log('=== HARDWARE INFO (Testing Mode) ===');
-    console.log(JSON.stringify(hardwareInfo, null, 2));
+    console.log('Payload to be sent to', HARDWARE_API_CONFIG.endpoint);
+    console.log(JSON.stringify(payload, null, 2));
     console.log('=====================================');
+    // Simulate a successful API call in testing mode
+    await new Promise(resolve => setTimeout(resolve, 1500)); // Simulate network delay
     return { success: true, message: 'Testing mode - logged to console' };
   }
 
   try {
-    // Transform data to match backend schema
-    const payload = {
-      gpu_info: Array.isArray(hardwareInfo.gpu_info) 
-        ? hardwareInfo.gpu_info.join(', ') 
-        : String(hardwareInfo.gpu_info || 'Unknown GPU'),
-      cpu_name: String(hardwareInfo.cpu_name || 'Unknown CPU'),
-      cpu_core: String(hardwareInfo.cpu_cores || 0),
-      cpu_frequency: String(hardwareInfo.cpu_frequency || 0),
-      total_memory: String(hardwareInfo.total_memory || 0),
-      total_swap: String(hardwareInfo.total_swap || 0),
-      ram: String(hardwareInfo.total_memory || 0), // Backend has separate 'ram' field
-      os_name: String(hardwareInfo.os_name || 'Unknown OS'),
-      os_version: String(hardwareInfo.os_version || 'Unknown'),
-      // user field will be automatically filled by backend from auth token
-    };
-
     console.log('Sending hardware info to backend:', payload);
-
-    // Use the api instance which already has auth token in headers
     const response = await api.post(HARDWARE_API_CONFIG.endpoint, payload);
-
     console.log('Hardware info sent successfully:', response.data);
     return { success: true, message: 'Hardware info sent successfully', data: response.data };
   } catch (error) {
     console.error('Failed to send hardware info:', error.response?.data || error.message);
-    
-    // Don't throw error - we don't want to block login if hardware info fails
     return { 
       success: false, 
       message: error.response?.data?.detail || error.message || 'Failed to send hardware info'
@@ -113,15 +111,15 @@ export async function sendHardwareInfoToBackend(hardwareInfo, authToken = null) 
 
 /**
  * Collect and send hardware info (convenience function)
+ * Now includes model_name
  */
-export async function collectAndSendHardwareInfo(authToken = null) {
+export async function collectAndSendHardwareInfo(modelName, authToken = null) {
   try {
     const hardwareInfo = await getHardwareInfo();
-    const result = await sendHardwareInfoToBackend(hardwareInfo, authToken);
+    const result = await sendHardwareInfoToBackend(hardwareInfo, modelName, authToken);
     return result;
   } catch (error) {
     console.error('Error in collectAndSendHardwareInfo:', error);
-    // Don't throw - just return error result
     return { success: false, message: error.message };
   }
 }

@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 
 import HardwareInfoDisplay from '../components/HardwareInfoDisplay';
+import ShareGpuModal from '../components/ShareGpuModal'; // <-- IMPORT MODAL
 
 // --- Placeholder Data ---
 const models = [
@@ -35,6 +36,7 @@ function ChatPage() {
   const [isHistoryVisible, setIsHistoryVisible] = useState(true);
   const [isModelDropdownOpen, setIsModelDropdownOpen] = useState(false);
   const [selectedModel, setSelectedModel] = useState(models.find(m => m.available));
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false); // <-- ADD MODAL STATE
 
   return (
     <div className="chat-container">
@@ -91,7 +93,8 @@ function ChatPage() {
           </div>
 
           <div className="header-actions">
-             <button className="gpu-share-btn">
+             {/* UPDATE BUTTON ONCLICK */}
+             <button className="gpu-share-btn" onClick={() => setIsShareModalOpen(true)}>
                 <Share2 size={16} />
                 <span>Share GPU</span>
              </button>
@@ -129,6 +132,12 @@ function ChatPage() {
           </button>
         </div>
       </main>
+      
+      {/* RENDER THE MODAL */}
+      <ShareGpuModal 
+        isOpen={isShareModalOpen} 
+        onClose={() => setIsShareModalOpen(false)} 
+      />
     </div>
   );
 }

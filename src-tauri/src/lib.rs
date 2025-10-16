@@ -143,35 +143,57 @@ fn get_gpu_info() -> Vec<String> {
 }
 
 // Windows-specific GPU detection using WMI
+// Windows-specific GPU detection using WMI
 #[cfg(target_os = "windows")]
 fn get_windows_gpu_info() -> Result<Vec<String>, String> {
     use wmi::{COMLibrary, WMIConnection, Variant};
     use std::collections::HashMap;
+    use std::thread;
 
-    let com_con = COMLibrary::new().map_err(|e| format!("Failed to initialize COM: {}", e))?;
-    let wmi_con = WMIConnection::new(com_con).map_err(|e| format!("Failed to connect to WMI: {}", e))?;
+    // Run the WMI query in a separate thread to ensure proper COM initialization.
+    let wmi_thread_handle = thread::spawn(|| -> Result<Vec<String>, String> {
+        // This initializes COM for the current thread. It will be uninitialized when the thread exits.
+        let com_con = COMLibrary::new().map_err(|e| format!("Failed to initialize COM: {}", e))?;
+        let wmi_con = WMIConnection::new(com_con).map_err(|e| format!("Failed to connect to WMI: {}", e))?;
 
-    let results: Vec<HashMap<String, Variant>> = wmi_con
-        .raw_query("SELECT Name, AdapterRAM FROM Win32_VideoController")
-        .map_err(|e| format!("Failed to query video controllers: {}", e))?;
+        let results: Vec<HashMap<String, Variant>> = wmi_con
+            .raw_query("SELECT Name, AdapterRAM FROM Win32_VideoController")
+            .map_err(|e| format!("WMI query failed: {}", e))?;
 
-    let mut gpu_list = Vec::new();
-
-    for gpu in results {
-        if let Some(Variant::String(name)) = gpu.get("Name") {
-            let mut gpu_info = name.clone();
-            
-            // Add VRAM info if available
-            if let Some(Variant::UI8(ram)) = gpu.get("AdapterRAM") {
-                let vram_gb = *ram as f64 / (1024.0 * 1024.0 * 1024.0);
-                gpu_info.push_str(&format!(" ({:.1} GB VRAM)", vram_gb));
-            }
-            
-            gpu_list.push(gpu_info);
+        if results.is_empty() {
+            return Err("No video controllers found.".to_string());
         }
-    }
 
-    Ok(gpu_list)
+        let mut gpu_list = Vec::new();
+        for gpu in results {
+            if let Some(Variant::String(name)) = gpu.get("Name") {
+                let mut gpu_info = name.clone();
+                
+                if let Some(ram_variant) = gpu.get("AdapterRAM") {
+                    let ram_bytes = match ram_variant {
+                        Variant::UI4(ram) => Some(*ram as u64),
+                        Variant::UI8(ram) => Some(*ram),
+                        _ => None,
+                    };
+                    
+                    if let Some(ram) = ram_bytes {
+                        if ram > 0 {
+                            let vram_gb = ram as f64 / (1024.0 * 1024.0 * 1024.0);
+                            gpu_info.push_str(&format!(" ({:.1} GB VRAM)", vram_gb));
+                        }
+                    }
+                }
+                gpu_list.push(gpu_info);
+            }
+        }
+        Ok(gpu_list)
+    });
+
+    // Wait for the thread to finish and return its result.
+    match wmi_thread_handle.join() {
+        Ok(result) => result,
+        Err(_) => Err("Failed to execute WMI thread.".to_string()),
+    }
 }
 
 // Send hardware info to backend

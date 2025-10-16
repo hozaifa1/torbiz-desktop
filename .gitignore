@@ -29,7 +29,6 @@ node_modules/
 # Tauri build artifacts and generated files
 src-tauri/target/
 src-tauri/gen/
-src-tauri/Cargo.lock  #<-- Re-evaluating. See below.
 
 # Build output
 dist/

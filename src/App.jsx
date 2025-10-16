@@ -2,9 +2,11 @@ import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { useEffect } from 'react';
 import HomePage from './pages/HomePage';
 import AuthPage from './pages/AuthPage';
 import ChatPage from './pages/ChatPage';
+import { collectAndSendHardwareInfo } from './utils/hardwareService';
 
 const queryClient = new QueryClient();
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
@@ -13,6 +15,20 @@ const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
 function AppRoutes() {
   const { user, loading } = useAuth();
   const location = useLocation();
+
+  // Send hardware info when user logs in
+  useEffect(() => {
+    if (user) {
+      const authToken = localStorage.getItem('authToken');
+      collectAndSendHardwareInfo(authToken)
+        .then(() => {
+          // Hardware info sent successfully (or logged in testing mode)
+        })
+        .catch(() => {
+          // Silent fail - don't interrupt user experience
+        });
+    }
+  }, [user]);
 
   if (loading) {
     return (
@@ -48,9 +64,7 @@ function AppRoutes() {
 
 // The main App component now sets up all providers
 function App() {
-  // Verify Google Client ID is loaded
   if (!googleClientId) {
-    console.error('Google Client ID is not configured in .env file');
     return (
       <div style={{ 
         display: 'flex', 
@@ -71,11 +85,7 @@ function App() {
   }
 
   return (
-    <GoogleOAuthProvider 
-      clientId={googleClientId}
-      onScriptLoadError={() => console.error('Failed to load Google OAuth script')}
-      onScriptLoadSuccess={() => console.log('Google OAuth script loaded successfully')}
-    >
+    <GoogleOAuthProvider clientId={googleClientId}>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <AppRoutes />

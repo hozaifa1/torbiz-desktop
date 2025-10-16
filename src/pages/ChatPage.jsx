@@ -6,6 +6,8 @@ import {
     MessageSquarePlus, Paperclip, SendHorizontal 
 } from 'lucide-react';
 
+import HardwareInfoTest from '../components/HardwareInfoTest';
+
 // --- Placeholder Data ---
 const models = [
   { name: 'Llama 3 70B', available: true, provider: 'Torbiz Network' },
@@ -124,6 +126,8 @@ function ChatPage() {
             <SendHorizontal size={20} />
           </button>
         </div>
+        {/* {process.env.NODE_ENV === 'development' && <HardwareInfoTest />} */}
+        {<HardwareInfoTest />}
       </main>
     </div>
   );

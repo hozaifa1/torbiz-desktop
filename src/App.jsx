@@ -1,3 +1,4 @@
+// src/App.jsx
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GoogleOAuthProvider } from '@react-oauth/google';
@@ -9,66 +10,78 @@ import ChatPage from './pages/ChatPage';
 import { collectAndSendHardwareInfo } from './utils/hardwareService';
 
 const queryClient = new QueryClient();
-const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID; //
 
 // This component uses the auth context and will be rendered inside the provider
 function AppRoutes() {
-  const { user, loading } = useAuth();
+  const { user, loading } = useAuth(); // Get user object which now contains 'id'
   const location = useLocation();
 
   // Send hardware info when user logs in (but only once per session)
   useEffect(() => {
-    if (user) {
-      // Check if hardware info was already sent this session
+    // Ensure user exists and has an id before proceeding
+    if (user && user.id) {
       const hardwareInfoSent = sessionStorage.getItem('hardwareInfoSent');
-      
+
       if (!hardwareInfoSent) {
         const authToken = localStorage.getItem('authToken');
-        collectAndSendHardwareInfo(authToken)
-          .then(() => {
-            console.log('Hardware info collected and sent successfully');
-            // Mark as sent for this session
-            sessionStorage.setItem('hardwareInfoSent', 'true');
+        // Pass the user.id to the function
+        collectAndSendHardwareInfo(user.id, authToken)
+          .then((result) => {
+            if (result.success) {
+              console.log('Hardware info collected and sent successfully on login.');
+              sessionStorage.setItem('hardwareInfoSent', 'true');
+            } else {
+              console.error('Failed to send hardware info on login:', result.message);
+              // Optionally add user feedback here
+            }
           })
           .catch((error) => {
-            console.error('Failed to send hardware info:', error);
-            // Don't mark as sent so it can retry next time
+            console.error('Exception during hardware info sending:', error);
+            // Optionally add user feedback here
           });
       }
     } else {
-      // Clear the flag when user logs out
+      // Clear the flag when user logs out or if user/id is missing
       sessionStorage.removeItem('hardwareInfoSent');
     }
-  }, [user]);
+  }, [user]); // Rerun effect when user state changes
 
   if (loading) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
         height: '100vh',
         flexDirection: 'column',
         gap: '1rem'
       }}>
         <h2>Loading Application...</h2>
-        <p style={{ color: '#666' }}>Please wait while we initialize...</p>
+        <p style={{ color: '#666' }}>Validating session...</p>
       </div>
     );
   }
 
   return (
     <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route 
-        path="/auth" 
-        element={!user ? <AuthPage /> : <Navigate to="/chat" replace />} 
+      {/* Redirect root to /chat if logged in, else to /auth */}
+      <Route
+        path="/"
+        element={user ? <Navigate to="/chat" replace /> : <Navigate to="/auth" replace />}
       />
+      {/* Auth page only accessible when not logged in */}
+      <Route
+        path="/auth"
+        element={!user ? <AuthPage /> : <Navigate to="/chat" replace />}
+      />
+      {/* Chat page protected */}
       <Route
         path="/chat"
         element={user ? <ChatPage /> : <Navigate to="/auth" state={{ from: location }} replace />}
       />
-      <Route path="*" element={<Navigate to="/" />} />
+      {/* Fallback redirect */}
+      <Route path="*" element={<Navigate to={user ? "/chat" : "/auth"} replace />} />
     </Routes>
   );
 }
@@ -77,10 +90,10 @@ function AppRoutes() {
 function App() {
   if (!googleClientId) {
     return (
-      <div style={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
         height: '100vh',
         flexDirection: 'column',
         gap: '1rem',
@@ -92,7 +105,7 @@ function App() {
           Google Client ID is missing. Please check your .env file.
         </p>
         <p style={{ fontSize: '0.9em', color: '#666' }}>
-          Make sure VITE_GOOGLE_CLIENT_ID is set in your .env file
+          Make sure VITE_GOOGLE_CLIENT_ID is set in your .env file.
         </p>
       </div>
     );
@@ -102,7 +115,7 @@ function App() {
     <GoogleOAuthProvider clientId={googleClientId}>
       <QueryClientProvider client={queryClient}>
         <AuthProvider>
-          <AppRoutes />
+          <AppRoutes /> {/* Render routes within AuthProvider */}
         </AuthProvider>
       </QueryClientProvider>
     </GoogleOAuthProvider>

@@ -8,8 +8,12 @@ use sysinfo::System;
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use std::process::{Child, Command, Stdio};
+// --- START ADDITION ---
+use tauri::path::BaseDirectory; // Import BaseDirectory for resource resolution
+use std::path::PathBuf;
+// --- END ADDITION ---
 
-// ===== EXISTING CODE - DO NOT MODIFY =====
+// ===== EXISTING CODE - DO NOT MODIFY (HardwareInfo, greet, show_notification, get_hardware_info, get_gpu_info, get_windows_gpu_info, start_oauth_server) =====
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct HardwareInfo {
@@ -203,6 +207,7 @@ async fn start_oauth_server(_app: tauri::AppHandle, window: tauri::Window) -> Re
 
 // ===== END OF EXISTING CODE =====
 
+
 // ===== NEW CODE FOR PETALS INTEGRATION =====
 
 /// State to manage the Petals seeder process
@@ -245,45 +250,30 @@ async fn start_petals_seeder(
         "python3"
     };
 
-    // Get the path to the Python script
-    // In development, it's in src-tauri/
-    // In production, it should be bundled with the app
-    let script_path = if cfg!(debug_assertions) {
-        // Development mode: use the source directory
-        let app_dir = app.path().app_config_dir()
-            .map_err(|e| format!("Failed to get app config dir: {}", e))?;
-        
-        // Try to find the script in the source directory
-        let dev_script = std::path::PathBuf::from("src-tauri/run_petals_seeder.py");
-        if dev_script.exists() {
-            dev_script
-        } else {
-            // Fallback: try relative to the executable
-            app_dir.join("run_petals_seeder.py")
-        }
-    } else {
-        // Production mode: script should be in the app's resource directory
-        let resource_dir = app.path().resource_dir()
-            .map_err(|e| format!("Failed to get resource dir: {}", e))?;
-        resource_dir.join("run_petals_seeder.py")
-    };
+    // --- START MODIFICATION ---
+    // Resolve the path to the bundled Python script
+    let script_path = app
+        .path()
+        .resolve("py/run_petals_seeder.py", BaseDirectory::Resource) // Use BaseDirectory::Resource
+        .map_err(|e| format!("Failed to resolve resource path: {}", e))?;
+    // --- END MODIFICATION ---
 
     // Verify the script exists
     if !script_path.exists() {
         return Err(format!(
-            "Python script not found at: {}. Please ensure run_petals_seeder.py is in the correct location.",
+            "Python script not found at resolved path: {}. Ensure it's listed in tauri.conf.json resources.",
             script_path.display()
         ));
     }
 
     println!("[PETALS] Starting seeder with script: {}", script_path.display());
     println!("[PETALS] Model: {}", model_name);
-    println!("[PETALS] Token: {}...{}", &node_token[..10.min(node_token.len())], 
+    println!("[PETALS] Token: {}...{}", &node_token[..10.min(node_token.len())],
              if node_token.len() > 20 { &node_token[node_token.len()-10..] } else { "" });
 
     // Spawn the Python process
     let child = Command::new(python_exe)
-        .arg(script_path.to_str().unwrap())
+        .arg(script_path.to_str().ok_or("Invalid script path format")?) // Convert PathBuf to &str
         .arg("--model-name")
         .arg(&model_name)
         .arg("--node-token")
@@ -300,10 +290,10 @@ async fn start_petals_seeder(
     {
         let mut process_guard = state.process.lock().unwrap();
         *process_guard = Some(child);
-        
+
         let mut model_guard = state.model_name.lock().unwrap();
         *model_guard = Some(model_name.clone());
-        
+
         let mut token_guard = state.node_token.lock().unwrap();
         *token_guard = Some(node_token);
     }
@@ -319,6 +309,7 @@ async fn start_petals_seeder(
     Ok(format!("Petals seeder started successfully for model: {}", model_name))
 }
 
+
 /// Stop the Petals seeder process
 #[tauri::command]
 async fn stop_petals_seeder(
@@ -331,37 +322,39 @@ async fn stop_petals_seeder(
     };
 
     let mut process_guard = state.process.lock().unwrap();
-    
+
     match process_guard.as_mut() {
         Some(child) => {
             println!("[PETALS] Stopping seeder process...");
-            
+
             // Try graceful shutdown first
             #[cfg(unix)]
             {
-                use std::os::unix::process::CommandExt;
+                use nix::sys::signal::{kill, Signal};
+                use nix::unistd::Pid;
                 // Send SIGTERM for graceful shutdown
-                if let Err(e) = nix::sys::signal::kill(
-                    nix::unistd::Pid::from_raw(child.id() as i32),
-                    nix::sys::signal::Signal::SIGTERM
+                if let Err(e) = kill(
+                    Pid::from_raw(child.id() as i32),
+                    Signal::SIGTERM
                 ) {
                     eprintln!("[PETALS] Failed to send SIGTERM: {}", e);
                 }
             }
-            
+
             #[cfg(windows)]
             {
                 // On Windows, just kill the process
-                if let Err(e) = child.kill() {
-                    eprintln!("[PETALS] Failed to kill process: {}", e);
+                 match child.kill() {
+                    Ok(_) => println!("[PETALS] Sent kill signal to process {}", child.id()),
+                    Err(e) => eprintln!("[PETALS] Failed to kill process {}: {}", child.id(), e),
                 }
             }
-            
+
             // Wait for the process to exit (with timeout)
             use std::time::Duration;
             let timeout = Duration::from_secs(5);
             let start = std::time::Instant::now();
-            
+
             loop {
                 match child.try_wait() {
                     Ok(Some(status)) => {
@@ -371,31 +364,40 @@ async fn stop_petals_seeder(
                     Ok(None) => {
                         if start.elapsed() > timeout {
                             println!("[PETALS] Timeout waiting for graceful shutdown, forcing kill...");
-                            let _ = child.kill();
-                            let _ = child.wait();
+                           match child.kill() { // Attempt kill again on timeout
+                                Ok(_) => println!("[PETALS] Sent force kill signal to process {}", child.id()),
+                                Err(e) => eprintln!("[PETALS] Failed to force kill process {}: {}", child.id(), e),
+                            }
+                            match child.wait() { // Wait after force kill
+                                Ok(status) => println!("[PETALS] Process exited after force kill with status: {}", status),
+                                Err(e) => eprintln!("[PETALS] Error waiting after force kill: {}", e),
+                            }
                             break;
                         }
                         std::thread::sleep(Duration::from_millis(100));
                     }
                     Err(e) => {
                         eprintln!("[PETALS] Error waiting for process: {}", e);
+                        // Attempt to kill if waiting failed, maybe the process is already gone but handle is stale?
+                        let _ = child.kill();
                         break;
                     }
                 }
             }
-            
+
+
             // Clear the state
             *process_guard = None;
-            drop(process_guard);
-            
+            drop(process_guard); // Release the lock
+
             {
                 let mut model_guard = state.model_name.lock().unwrap();
                 *model_guard = None;
-                
+
                 let mut token_guard = state.node_token.lock().unwrap();
                 *token_guard = None;
             }
-            
+
             // Send notification
             if let Some(model) = model_name {
                 app.notification()
@@ -405,30 +407,63 @@ async fn stop_petals_seeder(
                     .show()
                     .ok();
             }
-            
+
             Ok("Petals seeder stopped successfully".to_string())
         }
         None => Err("No Petals seeder process is currently running".to_string()),
     }
 }
 
+
 /// Check if Petals seeder is currently running
 #[tauri::command]
 async fn is_petals_seeder_running(
     state: tauri::State<'_, PetalsState>,
 ) -> Result<bool, String> {
-    let process_guard = state.process.lock().unwrap();
-    Ok(process_guard.is_some())
+    let mut process_guard = state.process.lock().unwrap();
+    match process_guard.as_mut() {
+        Some(child) => {
+            // Check if the process has already exited
+            match child.try_wait() {
+                Ok(Some(_status)) => {
+                    // Process exited, clear the state
+                    *process_guard = None;
+                    drop(process_guard); // Release lock before modifying other state parts
+                     {
+                        let mut model_guard = state.model_name.lock().unwrap();
+                        *model_guard = None;
+                        let mut token_guard = state.node_token.lock().unwrap();
+                        *token_guard = None;
+                    }
+                    Ok(false) // Not running anymore
+                }
+                Ok(None) => Ok(true), // Still running
+                Err(e) => {
+                    eprintln!("[PETALS] Error checking process status: {}", e);
+                     // Assume it might still be running, or failed to check
+                    Ok(true) // Safer to assume running if check fails
+                }
+            }
+        }
+        None => Ok(false), // Not running
+    }
 }
+
 
 /// Get information about the currently running Petals seeder
 #[tauri::command]
 async fn get_petals_seeder_info(
     state: tauri::State<'_, PetalsState>,
 ) -> Result<Option<String>, String> {
-    let model_guard = state.model_name.lock().unwrap();
-    Ok(model_guard.clone())
+    // First, check if it's actually running
+     if !is_petals_seeder_running(state.clone()).await? {
+        Ok(None)
+    } else {
+        let model_guard = state.model_name.lock().unwrap();
+        Ok(model_guard.clone())
+    }
 }
+
 
 // ===== END OF NEW CODE =====
 

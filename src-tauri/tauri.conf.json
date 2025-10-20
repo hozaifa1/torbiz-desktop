@@ -43,6 +43,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "publisher": "Torbiz Team"
+    "publisher": "Torbiz Team",
+    "resources": ["py/run_petals_seeder.py"]
   }
 }

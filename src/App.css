@@ -913,3 +913,20 @@ button:hover {
     transform: rotate(360deg);
   }
 }
+.status-display.error {
+    min-height: 50px;
+    margin-bottom: 1rem;
+    color: #721c24; /* Darker red text */
+    background: #f8d7da; /* Light red background */
+    padding: 0.75rem;
+    border: 1px solid #f5c6cb; /* Reddish border */
+    border-radius: 4px;
+    text-align: left;
+    display: flex;
+    align-items: center;
+}
+ .status-display.error p {
+     color: #721c24; /* Ensure p tag inherits color */
+     font-size: 0.9em;
+     margin-bottom: 0 !important; /* Override default p margin */
+ }

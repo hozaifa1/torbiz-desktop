@@ -4,21 +4,23 @@
 
 use tauri::{Manager, Emitter};
 use tauri_plugin_notification::NotificationExt;
-// Removed unused `Disks` import
-use sysinfo::{System};
+use sysinfo::System;
 use serde::{Deserialize, Serialize};
-// Removed unused `Arc` and `Mutex` imports from std::sync
+use std::sync::{Arc, Mutex};
+use std::process::{Child, Command, Stdio};
+
+// ===== EXISTING CODE - DO NOT MODIFY =====
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct HardwareInfo {
     pub cpu_name: String,
     pub cpu_cores: usize,
-    pub cpu_frequency: u64, // MHz
-    pub total_memory: u64,  // GB
-    pub total_swap: u64,    // GB
+    pub cpu_frequency: u64,
+    pub total_memory: u64,
+    pub total_swap: u64,
     pub os_name: String,
     pub os_version: String,
-    pub gpu_info: Vec<String>, // GPU names/descriptions
+    pub gpu_info: Vec<String>,
 }
 
 #[tauri::command]
@@ -36,13 +38,11 @@ fn show_notification(app: tauri::AppHandle, title: String, body: String) {
         .unwrap();
 }
 
-// Get hardware information
 #[tauri::command]
 fn get_hardware_info() -> Result<HardwareInfo, String> {
     let mut sys = System::new_all();
     sys.refresh_all();
 
-    // CPU Information
     let cpu_name = sys.cpus().first()
         .map(|cpu| cpu.brand().to_string())
         .unwrap_or_else(|| "Unknown CPU".to_string());
@@ -53,15 +53,12 @@ fn get_hardware_info() -> Result<HardwareInfo, String> {
         .map(|cpu| cpu.frequency())
         .unwrap_or(0);
 
-    // Memory Information (convert from bytes to GB)
     let total_memory = sys.total_memory() / (1024 * 1024 * 1024);
     let total_swap = sys.total_swap() / (1024 * 1024 * 1024);
 
-    // OS Information
     let os_name = System::name().unwrap_or_else(|| "Unknown OS".to_string());
     let os_version = System::os_version().unwrap_or_else(|| "Unknown".to_string());
 
-    // GPU Information (platform-specific)
     let gpu_info = get_gpu_info();
 
     Ok(HardwareInfo {
@@ -76,13 +73,11 @@ fn get_hardware_info() -> Result<HardwareInfo, String> {
     })
 }
 
-// Platform-specific GPU detection
 fn get_gpu_info() -> Vec<String> {
     let mut gpus = Vec::new();
 
     #[cfg(target_os = "windows")]
     {
-        // Windows: Use WMI to query video controllers
         match get_windows_gpu_info() {
             Ok(gpu_list) => {
                 if !gpu_list.is_empty() {
@@ -100,7 +95,6 @@ fn get_gpu_info() -> Vec<String> {
 
     #[cfg(target_os = "linux")]
     {
-        // Linux: Try to read from lspci
         if let Ok(output) = std::process::Command::new("lspci")
             .arg("-v")
             .output()
@@ -120,7 +114,6 @@ fn get_gpu_info() -> Vec<String> {
 
     #[cfg(target_os = "macos")]
     {
-        // macOS: Use system_profiler
         if let Ok(output) = std::process::Command::new("system_profiler")
             .arg("SPDisplaysDataType")
             .output()
@@ -145,16 +138,13 @@ fn get_gpu_info() -> Vec<String> {
     gpus
 }
 
-// Windows-specific GPU detection using WMI
 #[cfg(target_os = "windows")]
 fn get_windows_gpu_info() -> Result<Vec<String>, String> {
     use wmi::{COMLibrary, WMIConnection, Variant};
     use std::collections::HashMap;
     use std::thread;
 
-    // Run the WMI query in a separate thread to ensure proper COM initialization.
     let wmi_thread_handle = thread::spawn(|| -> Result<Vec<String>, String> {
-        // This initializes COM for the current thread. It will be uninitialized when the thread exits.
         let com_con = COMLibrary::new().map_err(|e| format!("Failed to initialize COM: {}", e))?;
         let wmi_con = WMIConnection::new(com_con).map_err(|e| format!("Failed to connect to WMI: {}", e))?;
 
@@ -191,43 +181,256 @@ fn get_windows_gpu_info() -> Result<Vec<String>, String> {
         Ok(gpu_list)
     });
 
-    // Wait for the thread to finish and return its result.
     match wmi_thread_handle.join() {
         Ok(result) => result,
         Err(_) => Err("Failed to execute WMI thread.".to_string()),
     }
 }
 
-
-// Send hardware info to backend (REMOVED - This function seems unused, replaced by logic in hardwareService.js on the frontend)
-// #[tauri::command]
-// async fn send_hardware_info_to_backend(
-//     hardware_info: HardwareInfo,
-//     backend_url: String,
-//     auth_token: Option<String>,
-// ) -> Result<String, String> { ... }
-
-
-// FIXED: OAuth server with FIXED port 8080
 #[tauri::command]
-// Add underscore to 'app' parameter name
 async fn start_oauth_server(_app: tauri::AppHandle, window: tauri::Window) -> Result<u16, String> {
-    // Use fixed port 8080 for consistent redirect URI
     const OAUTH_PORT: u16 = 8080;
 
-    // Add underscore to 'result' variable name
     let _result = tauri_plugin_oauth::start(move |url| {
         if let Err(e) = window.emit("oauth_redirect", url) {
             eprintln!("Failed to emit oauth_redirect event: {:?}", e);
         }
     })
-    .map_err(|err| err.to_string())?; // Still handle potential error using '?'
+    .map_err(|err| err.to_string())?;
 
-    // Always return port 8080 for consistency
-    // Note: The actual port used by the plugin might vary, but we tell the frontend to use 8080
-    // You need to configure http://localhost:8080/ in your Google Cloud Console
     Ok(OAUTH_PORT)
 }
+
+// ===== END OF EXISTING CODE =====
+
+// ===== NEW CODE FOR PETALS INTEGRATION =====
+
+/// State to manage the Petals seeder process
+pub struct PetalsState {
+    process: Arc<Mutex<Option<Child>>>,
+    model_name: Arc<Mutex<Option<String>>>,
+    node_token: Arc<Mutex<Option<String>>>,
+}
+
+impl PetalsState {
+    pub fn new() -> Self {
+        Self {
+            process: Arc::new(Mutex::new(None)),
+            model_name: Arc::new(Mutex::new(None)),
+            node_token: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+/// Start the Petals seeder process
+#[tauri::command]
+async fn start_petals_seeder(
+    model_name: String,
+    node_token: String,
+    state: tauri::State<'_, PetalsState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    // Check if a process is already running
+    {
+        let process_guard = state.process.lock().unwrap();
+        if process_guard.is_some() {
+            return Err("Petals seeder is already running. Stop it first before starting a new one.".to_string());
+        }
+    }
+
+    // Get the Python executable path
+    let python_exe = if cfg!(target_os = "windows") {
+        "python"
+    } else {
+        "python3"
+    };
+
+    // Get the path to the Python script
+    // In development, it's in src-tauri/
+    // In production, it should be bundled with the app
+    let script_path = if cfg!(debug_assertions) {
+        // Development mode: use the source directory
+        let app_dir = app.path().app_config_dir()
+            .map_err(|e| format!("Failed to get app config dir: {}", e))?;
+        
+        // Try to find the script in the source directory
+        let dev_script = std::path::PathBuf::from("src-tauri/run_petals_seeder.py");
+        if dev_script.exists() {
+            dev_script
+        } else {
+            // Fallback: try relative to the executable
+            app_dir.join("run_petals_seeder.py")
+        }
+    } else {
+        // Production mode: script should be in the app's resource directory
+        let resource_dir = app.path().resource_dir()
+            .map_err(|e| format!("Failed to get resource dir: {}", e))?;
+        resource_dir.join("run_petals_seeder.py")
+    };
+
+    // Verify the script exists
+    if !script_path.exists() {
+        return Err(format!(
+            "Python script not found at: {}. Please ensure run_petals_seeder.py is in the correct location.",
+            script_path.display()
+        ));
+    }
+
+    println!("[PETALS] Starting seeder with script: {}", script_path.display());
+    println!("[PETALS] Model: {}", model_name);
+    println!("[PETALS] Token: {}...{}", &node_token[..10.min(node_token.len())], 
+             if node_token.len() > 20 { &node_token[node_token.len()-10..] } else { "" });
+
+    // Spawn the Python process
+    let child = Command::new(python_exe)
+        .arg(script_path.to_str().unwrap())
+        .arg("--model-name")
+        .arg(&model_name)
+        .arg("--node-token")
+        .arg(&node_token)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Failed to spawn Python process: {}. Make sure Python 3 is installed and in PATH.", e))?;
+
+    let child_id = child.id();
+    println!("[PETALS] Spawned process with PID: {}", child_id);
+
+    // Store the process, model name, and token in state
+    {
+        let mut process_guard = state.process.lock().unwrap();
+        *process_guard = Some(child);
+        
+        let mut model_guard = state.model_name.lock().unwrap();
+        *model_guard = Some(model_name.clone());
+        
+        let mut token_guard = state.node_token.lock().unwrap();
+        *token_guard = Some(node_token);
+    }
+
+    // Send success notification
+    app.notification()
+        .builder()
+        .title("GPU Sharing Active")
+        .body(format!("Now serving {} to the network", model_name))
+        .show()
+        .ok();
+
+    Ok(format!("Petals seeder started successfully for model: {}", model_name))
+}
+
+/// Stop the Petals seeder process
+#[tauri::command]
+async fn stop_petals_seeder(
+    state: tauri::State<'_, PetalsState>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let model_name = {
+        let model_guard = state.model_name.lock().unwrap();
+        model_guard.clone()
+    };
+
+    let mut process_guard = state.process.lock().unwrap();
+    
+    match process_guard.as_mut() {
+        Some(child) => {
+            println!("[PETALS] Stopping seeder process...");
+            
+            // Try graceful shutdown first
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                // Send SIGTERM for graceful shutdown
+                if let Err(e) = nix::sys::signal::kill(
+                    nix::unistd::Pid::from_raw(child.id() as i32),
+                    nix::sys::signal::Signal::SIGTERM
+                ) {
+                    eprintln!("[PETALS] Failed to send SIGTERM: {}", e);
+                }
+            }
+            
+            #[cfg(windows)]
+            {
+                // On Windows, just kill the process
+                if let Err(e) = child.kill() {
+                    eprintln!("[PETALS] Failed to kill process: {}", e);
+                }
+            }
+            
+            // Wait for the process to exit (with timeout)
+            use std::time::Duration;
+            let timeout = Duration::from_secs(5);
+            let start = std::time::Instant::now();
+            
+            loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        println!("[PETALS] Process exited with status: {}", status);
+                        break;
+                    }
+                    Ok(None) => {
+                        if start.elapsed() > timeout {
+                            println!("[PETALS] Timeout waiting for graceful shutdown, forcing kill...");
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                    Err(e) => {
+                        eprintln!("[PETALS] Error waiting for process: {}", e);
+                        break;
+                    }
+                }
+            }
+            
+            // Clear the state
+            *process_guard = None;
+            drop(process_guard);
+            
+            {
+                let mut model_guard = state.model_name.lock().unwrap();
+                *model_guard = None;
+                
+                let mut token_guard = state.node_token.lock().unwrap();
+                *token_guard = None;
+            }
+            
+            // Send notification
+            if let Some(model) = model_name {
+                app.notification()
+                    .builder()
+                    .title("GPU Sharing Stopped")
+                    .body(format!("Stopped serving {}", model))
+                    .show()
+                    .ok();
+            }
+            
+            Ok("Petals seeder stopped successfully".to_string())
+        }
+        None => Err("No Petals seeder process is currently running".to_string()),
+    }
+}
+
+/// Check if Petals seeder is currently running
+#[tauri::command]
+async fn is_petals_seeder_running(
+    state: tauri::State<'_, PetalsState>,
+) -> Result<bool, String> {
+    let process_guard = state.process.lock().unwrap();
+    Ok(process_guard.is_some())
+}
+
+/// Get information about the currently running Petals seeder
+#[tauri::command]
+async fn get_petals_seeder_info(
+    state: tauri::State<'_, PetalsState>,
+) -> Result<Option<String>, String> {
+    let model_guard = state.model_name.lock().unwrap();
+    Ok(model_guard.clone())
+}
+
+// ===== END OF NEW CODE =====
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -235,12 +438,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_oauth::init())
+        .manage(PetalsState::new()) // Add Petals state management
         .invoke_handler(tauri::generate_handler![
             greet,
             show_notification,
             start_oauth_server,
             get_hardware_info,
-            // Removed send_hardware_info_to_backend from handlers as it's not being called from frontend
+            // New Petals commands
+            start_petals_seeder,
+            stop_petals_seeder,
+            is_petals_seeder_running,
+            get_petals_seeder_info,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

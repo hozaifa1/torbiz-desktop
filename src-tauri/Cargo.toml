@@ -31,3 +31,7 @@ urlencoding = "2.1"
 # Windows-specific dependencies for GPU detection
 [target.'cfg(windows)'.dependencies]
 wmi = "0.13"
+
+# Unix-specific dependencies for graceful process shutdown
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.27", features = ["signal"] }

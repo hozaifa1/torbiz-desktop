@@ -1,8 +1,8 @@
 // src/components/ShareGpuModal.jsx
 import React, { useState } from 'react';
-// Import the updated orchestrator function and deregister function
 import { collectAndSendHardwareInfo, deregisterGpuNode } from '../utils/hardwareService';
 import { X, CheckCircle, AlertTriangle, Loader, PowerOff } from 'lucide-react';
+import { isTauriEnvironment } from '../utils/tauriHelpers';
 
 // Placeholder model list (should match models fetched in ChatPage ideally)
 const supportedModels = [
@@ -13,83 +13,120 @@ const supportedModels = [
 
 function ShareGpuModal({ isOpen, onClose }) {
   const [selectedModel, setSelectedModel] = useState(supportedModels[0].id);
-  // idle, loading-step1, loading-step2, success, error-share, loading-stop, error-stop
+  // Status states:
+  // idle, loading-register, loading-seeder, success, error-register, error-seeder, loading-stop, error-stop
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
-  const [nodeToken, setNodeToken] = useState(null); // State to store the node token
+  const [nodeToken, setNodeToken] = useState(null);
 
   const handleShare = async () => {
-    // Indicate start of process
-    setStatus('loading-step1'); // Changed from loading-share
-    setMessage('Collecting hardware info and creating record...');
-    setNodeToken(null); // Clear previous token
+    // Step 1: Register hardware and get node token
+    setStatus('loading-register');
+    setMessage('Registering your GPU with the network...');
+    setNodeToken(null);
 
-    // Call the orchestrator function
-    const result = await collectAndSendHardwareInfo(selectedModel);
+    const registrationResult = await collectAndSendHardwareInfo(selectedModel);
 
-    // Check for final success and node_token from Step 2
-    if (result.success && result.data?.node_token) {
+    if (!registrationResult.success || !registrationResult.data?.node_token) {
+      setStatus('error-register');
+      if (registrationResult.success && !registrationResult.data?.node_token) {
+        setMessage('Registration succeeded, but no node token received. Cannot start Petals seeder.');
+      } else {
+        setMessage(`Registration failed: ${registrationResult.message}`);
+      }
+      return;
+    }
+
+    const receivedToken = registrationResult.data.node_token;
+    setNodeToken(receivedToken);
+    console.log("GPU Registered. Node Token:", receivedToken);
+
+    // Step 2: Start Petals seeder (only in Tauri environment)
+    if (!isTauriEnvironment()) {
       setStatus('success');
-      setMessage('Your GPU is now registered and sharing. Keep this window open or minimize.');
-      setNodeToken(result.data.node_token); // Store the received token
-      console.log("GPU Registered. Node Token:", result.data.node_token);
+      setMessage('GPU registered successfully. (Petals seeder only works in desktop app)');
+      console.log("[SHARE-GPU] Web environment detected, skipping Petals seeder");
+      return;
     }
-    // Handle case where Step 2 succeeded but no token (backend issue)
-    else if (result.success && !result.data?.node_token) {
-        setStatus('error-share'); // Treat as error if token missing at the end
-        setMessage('Registration succeeded, but no node token received from backend. Cannot stop sharing automatically.');
-        console.error("Registration final step success but missing node_token:", result.data);
-    }
-    // Handle failure at either Step 1 or Step 2
-    else {
-      setStatus('error-share');
-      // The message from collectAndSendHardwareInfo already indicates which step failed
-      setMessage(`Registration failed: ${result.message}`);
+
+    setStatus('loading-seeder');
+    setMessage('Starting Petals seeder process...');
+
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      const seederResult = await invoke('start_petals_seeder', {
+        modelName: selectedModel,
+        nodeToken: receivedToken
+      });
+
+      console.log("[SHARE-GPU] Petals seeder started:", seederResult);
+      setStatus('success');
+      setMessage('Your GPU is now actively serving the network. Keep this window open or minimize it.');
+      
+    } catch (error) {
+      console.error("[SHARE-GPU] Failed to start Petals seeder:", error);
+      setStatus('error-seeder');
+      setMessage(`Petals seeder failed to start: ${error}. Your GPU is registered but not serving yet.`);
     }
   };
 
   const handleStop = async () => {
-    // Stop logic remains the same
     if (!nodeToken) {
-        setMessage('No active node token found. Cannot stop sharing automatically.');
-        setStatus('error-stop');
-        return;
+      setMessage('No active node token found. Cannot stop sharing automatically.');
+      setStatus('error-stop');
+      return;
     }
+
     setStatus('loading-stop');
-    setMessage('Attempting to de-register your GPU node...');
-    const result = await deregisterGpuNode(nodeToken);
-    if (result.success) {
+    setMessage('Stopping Petals seeder and de-registering GPU...');
+
+    // Step 1: Stop Petals seeder (only in Tauri environment)
+    if (isTauriEnvironment()) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const stopResult = await invoke('stop_petals_seeder');
+        console.log("[SHARE-GPU] Petals seeder stopped:", stopResult);
+      } catch (error) {
+        console.error("[SHARE-GPU] Failed to stop Petals seeder:", error);
+        // Continue to de-register even if seeder stop fails
+      }
+    }
+
+    // Step 2: De-register from backend
+    const deregisterResult = await deregisterGpuNode(nodeToken);
+    
+    if (deregisterResult.success) {
       setStatus('idle');
       setMessage('GPU sharing stopped successfully.');
       setNodeToken(null);
     } else {
       setStatus('error-stop');
-      setMessage(`Failed to stop sharing: ${result.message}. You might need to restart.`);
+      setMessage(`Failed to de-register: ${deregisterResult.message}. The seeder has stopped, but backend may still show you as active.`);
     }
   };
 
   const handleClose = () => {
-    // Close logic remains the same
-    if (status !== 'loading-step1' && status !== 'loading-step2' && status !== 'loading-stop') {
+    if (status !== 'loading-register' && status !== 'loading-seeder' && status !== 'loading-stop') {
       if (status === 'error-stop') {
-          setStatus('success');
-          setMessage('Failed to stop sharing automatically. Your GPU might still be registered.');
+        setStatus('success');
+        setMessage('Failed to stop automatically. Your GPU might still be registered.');
+      } else {
+        onClose();
       }
-      else { onClose(); }
     }
   };
 
   if (!isOpen) return null;
 
-  const isLoading = status === 'loading-step1' || status === 'loading-step2' || status === 'loading-stop';
-  const isSharing = status === 'success' || status === 'error-stop' || status === 'loading-stop';
+  const isLoading = status === 'loading-register' || status === 'loading-seeder' || status === 'loading-stop';
+  const isSharing = status === 'success' || status === 'error-stop' || status === 'loading-stop' || status === 'error-seeder';
 
-  // Update loading message based on status
+  // Dynamic loading message
   let loadingMessage = 'Processing...';
-  if (status === 'loading-step1') loadingMessage = 'Collecting hardware info and creating record...';
-  if (status === 'loading-step2') loadingMessage = 'Registering node for model...'; // This status isn't explicitly set currently, but could be added in collectAndSendHardwareInfo
-  if (status === 'loading-stop') loadingMessage = 'Attempting to de-register your GPU node...';
-
+  if (status === 'loading-register') loadingMessage = 'Registering your GPU with the network...';
+  if (status === 'loading-seeder') loadingMessage = 'Starting Petals seeder process...';
+  if (status === 'loading-stop') loadingMessage = 'Stopping seeder and de-registering...';
 
   return (
     <div className="modal-overlay">
@@ -100,14 +137,14 @@ function ShareGpuModal({ isOpen, onClose }) {
 
         <h2>{isSharing ? 'GPU Sharing Active' : 'Share Your GPU'}</h2>
 
-        {/* --- Idle or Share Error State --- */}
-        {(status === 'idle' || status === 'error-share') && (
+        {/* Idle or Registration Error State */}
+        {(status === 'idle' || status === 'error-register') && (
           <>
             <p>Select a model to host. Your computer will contribute processing power to the Torbiz network for this model.</p>
-            {status === 'error-share' && (
+            {status === 'error-register' && (
               <div className="status-display error">
-                  <AlertTriangle size={20} style={{ marginRight: '8px', flexShrink: 0 }}/>
-                  <p style={{ margin: 0 }}>{message}</p>
+                <AlertTriangle size={20} style={{ marginRight: '8px', flexShrink: 0 }}/>
+                <p style={{ margin: 0 }}>{message}</p>
               </div>
             )}
             <div className="form-group">
@@ -126,45 +163,45 @@ function ShareGpuModal({ isOpen, onClose }) {
               </select>
             </div>
             <button className="modal-action-btn primary" onClick={handleShare} disabled={isLoading}>
-              {status === 'error-share' ? 'Try Sharing Again' : 'Start Sharing'}
+              {status === 'error-register' ? 'Try Sharing Again' : 'Start Sharing'}
             </button>
-             {status === 'error-share' && (
-                 <button className="modal-action-btn secondary" onClick={handleClose} disabled={isLoading}>
-                     Cancel
-                 </button>
-             )}
+            {status === 'error-register' && (
+              <button className="modal-action-btn secondary" onClick={handleClose} disabled={isLoading}>
+                Cancel
+              </button>
+            )}
           </>
         )}
 
-        {/* --- Loading State (Sharing or Stopping) --- */}
+        {/* Loading State */}
         {isLoading && (
           <div className="status-display">
             <Loader size={48} className="spinner" />
-            <p>{loadingMessage}</p> {/* Use dynamic loading message */}
+            <p>{loadingMessage}</p>
           </div>
         )}
 
-        {/* --- Success State (Actively Sharing) or Error Stopping --- */}
+        {/* Success or Error State (Actively Sharing or Seeder Error) */}
         {isSharing && status !== 'loading-stop' && (
-           <div className="status-display">
-             {status === 'success' && <CheckCircle size={48} color="#28a745" />}
-             {status === 'error-stop' && <AlertTriangle size={48} color="#dc3545" />}
-             <p style={{ color: status === 'error-stop' ? '#dc3545' : 'inherit' }}>{message}</p>
-             <button className="modal-action-btn secondary" onClick={handleStop} disabled={isLoading} style={{ backgroundColor: '#dc3545', color: 'white' }}>
-                  <PowerOff size={16} style={{ marginRight: '8px' }} /> Stop Sharing
-             </button>
-             <button className="modal-action-btn secondary" onClick={handleClose} disabled={isLoading}>
-                  Close (Keep Sharing)
-             </button>
-           </div>
+          <div className="status-display">
+            {status === 'success' && <CheckCircle size={48} color="#28a745" />}
+            {(status === 'error-stop' || status === 'error-seeder') && <AlertTriangle size={48} color="#dc3545" />}
+            <p style={{ color: (status === 'error-stop' || status === 'error-seeder') ? '#dc3545' : 'inherit' }}>
+              {message}
+            </p>
+            <button 
+              className="modal-action-btn secondary" 
+              onClick={handleStop} 
+              disabled={isLoading} 
+              style={{ backgroundColor: '#dc3545', color: 'white' }}
+            >
+              <PowerOff size={16} style={{ marginRight: '8px' }} /> Stop Sharing
+            </button>
+            <button className="modal-action-btn secondary" onClick={handleClose} disabled={isLoading}>
+              {status === 'success' ? 'Close (Keep Sharing)' : 'Close'}
+            </button>
+          </div>
         )}
-
-        {/* Error Styling (Keep as is) */}
-        <style jsx>{`
-            .status-display.error { /* ... */ }
-            .status-display.error p { /* ... */ }
-        `}</style>
-
       </div>
     </div>
   );

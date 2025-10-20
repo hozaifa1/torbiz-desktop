@@ -33,7 +33,6 @@
       }
     }
   },
-  "plugins": {},
   "bundle": {
     "active": true,
     "targets": "all",

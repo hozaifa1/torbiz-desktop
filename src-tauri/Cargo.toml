@@ -25,6 +25,9 @@ sysinfo = "0.31"
 reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
 
+# URL encoding for OAuth
+urlencoding = "2.1"
+
 # Windows-specific dependencies for GPU detection
 [target.'cfg(windows)'.dependencies]
 wmi = "0.13"

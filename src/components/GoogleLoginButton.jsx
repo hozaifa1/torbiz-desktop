@@ -116,14 +116,21 @@ function GoogleLoginButton() {
     setLoading(true);
     
     try {
-      // Start the OAuth server (will use port 8080 via proxy)
+      // Start the OAuth server on a dynamic port
       console.log('[GOOGLE-LOGIN] Invoking start_oauth_server...');
       const port = await tauriApis.invoke('start_oauth_server');
-      console.log('[GOOGLE-LOGIN] OAuth proxy server started on port:', port);
+      console.log('[GOOGLE-LOGIN] OAuth server started on port:', port);
       
-      // Always use port 8080 (the proxy port)
-      const redirectUri = 'http://localhost:8080/';
+      // Use the dynamically assigned port for desktop app
+      const redirectUri = `http://localhost:${port}/`;
       const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+      
+      // Log the configuration for debugging
+      console.log('[GOOGLE-LOGIN] OAuth Configuration:', {
+        clientId: clientId ? 'configured' : 'missing',
+        redirectUri,
+        environment: 'desktop'
+      });
       
       if (!clientId) {
         throw new Error('Google Client ID not configured');
@@ -134,9 +141,10 @@ function GoogleLoginButton() {
       const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
       authUrl.searchParams.set('client_id', clientId);
       authUrl.searchParams.set('redirect_uri', redirectUri);
-      authUrl.searchParams.set('response_type', 'id_token token');
+      authUrl.searchParams.set('response_type', 'id_token');
       authUrl.searchParams.set('scope', 'openid profile email');
       authUrl.searchParams.set('nonce', Math.random().toString(36));
+      authUrl.searchParams.set('prompt', 'select_account consent');
       
       console.log('[GOOGLE-LOGIN] Opening Google Auth URL:', authUrl.toString());
       
@@ -154,6 +162,11 @@ function GoogleLoginButton() {
   const handleWebGoogleLogin = async (credentialResponse) => {
     try {
       console.log('[GOOGLE-LOGIN] Web login initiated');
+      console.log('[GOOGLE-LOGIN] OAuth Configuration:', {
+        clientId: import.meta.env.VITE_GOOGLE_CLIENT_ID ? 'configured' : 'missing',
+        redirectUri: 'https://torbiz-backend.vercel.app/client/google-auth/',
+        environment: 'web'
+      });
       setLoading(true);
       await googleLogin(credentialResponse.credential);
       console.log('[GOOGLE-LOGIN] Web login successful');

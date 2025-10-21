@@ -193,16 +193,28 @@ fn get_windows_gpu_info() -> Result<Vec<String>, String> {
 
 #[tauri::command]
 async fn start_oauth_server(_app: tauri::AppHandle, window: tauri::Window) -> Result<u16, String> {
-    const OAUTH_PORT: u16 = 8080;
+    const MIN_PORT: u16 = 8000;
+    const MAX_PORT: u16 = 8010;  // Limit to a reasonable range
 
-    let _result = tauri_plugin_oauth::start(move |url| {
-        if let Err(e) = window.emit("oauth_redirect", url) {
-            eprintln!("Failed to emit oauth_redirect event: {:?}", e);
+    // Try ports in our defined range
+    for port in MIN_PORT..=MAX_PORT {
+        match tauri_plugin_oauth::start_with_port(port, move |url| {
+            if let Err(e) = window.emit("oauth_redirect", url) {
+                eprintln!("Failed to emit oauth_redirect event: {:?}", e);
+            }
+        }) {
+            Ok(result) => {
+                println!("OAuth server started on port: {}", result.port);
+                return Ok(result.port);
+            }
+            Err(e) => {
+                eprintln!("Failed to start OAuth server on port {}: {}", port, e);
+                continue;
+            }
         }
-    })
-    .map_err(|err| err.to_string())?;
+    }
 
-    Ok(OAUTH_PORT)
+    Err("Failed to find an available port for OAuth server".to_string())
 }
 
 // ===== END OF EXISTING CODE =====

@@ -198,14 +198,26 @@ async fn start_oauth_server(_app: tauri::AppHandle, window: tauri::Window) -> Re
 
     // Try ports in our defined range
     for port in MIN_PORT..=MAX_PORT {
-        match tauri_plugin_oauth::start_with_port(port, move |url| {
-            if let Err(e) = window.emit("oauth_redirect", url) {
+        // --- START CORRECTION ---
+        // Replace `start_with_port` with `start_with_config`
+        let config = tauri_plugin_oauth::OauthConfig {
+            ports: Some(vec![port]),
+            response: None, // Or configure response HTML if needed
+        };
+        let window_clone = window.clone(); 
+        
+        match tauri_plugin_oauth::start_with_config(config, move |url| {
+            // Use the clone to emit the event
+            if let Err(e) = window_clone.emit("oauth_redirect", url) {
                 eprintln!("Failed to emit oauth_redirect event: {:?}", e);
             }
         }) {
             Ok(result) => {
-                println!("OAuth server started on port: {}", result.port);
-                return Ok(result.port);
+                // --- START CORRECTION ---
+                // 'result' is the u16 port, not a struct. Access it directly.
+                println!("OAuth server started on port: {}", result);
+                return Ok(result);
+                // --- END CORRECTION ---
             }
             Err(e) => {
                 eprintln!("Failed to start OAuth server on port {}: {}", port, e);
@@ -218,9 +230,6 @@ async fn start_oauth_server(_app: tauri::AppHandle, window: tauri::Window) -> Re
 }
 
 // ===== END OF EXISTING CODE =====
-
-
-// ===== NEW CODE FOR PETALS INTEGRATION =====
 
 /// State to manage the Petals seeder process
 pub struct PetalsState {

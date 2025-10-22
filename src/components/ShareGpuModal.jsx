@@ -104,12 +104,11 @@ function calculateHostableShards(gpuVramGB, vramPerShard) {
 }
 
 // Helper to extract VRAM from GPU info string
+// Helper to extract VRAM from GPU info string - GET THE MAXIMUM VRAM
 function extractVramFromGpuInfo(gpuInfoArray) {
   if (!Array.isArray(gpuInfoArray) || gpuInfoArray.length === 0) {
     return null;
   }
-  
-  const gpuString = gpuInfoArray.join(' ');
   
   const vramPatterns = [
     /(\d+(?:\.\d+)?)\s*GB\s*VRAM/i,
@@ -117,14 +116,25 @@ function extractVramFromGpuInfo(gpuInfoArray) {
     /(\d+(?:\.\d+)?)\s*GB/i,
   ];
   
-  for (const pattern of vramPatterns) {
-    const match = gpuString.match(pattern);
-    if (match && match[1]) {
-      return parseFloat(match[1]);
+  let maxVram = 0;
+  let foundAny = false;
+  
+  // Check ALL GPUs and find the maximum VRAM
+  for (const gpuString of gpuInfoArray) {
+    for (const pattern of vramPatterns) {
+      const match = gpuString.match(pattern);
+      if (match && match[1]) {
+        const vram = parseFloat(match[1]);
+        if (vram > maxVram) {
+          maxVram = vram;
+          foundAny = true;
+          console.log(`[GPU-VRAM] Found ${vram}GB in: ${gpuString}`);
+        }
+      }
     }
   }
   
-  return null;
+  return foundAny ? maxVram : null;
 }
 
 function ShareGpuModal({ isOpen, onClose }) {
@@ -139,6 +149,8 @@ function ShareGpuModal({ isOpen, onClose }) {
   const [gpuVram, setGpuVram] = useState(null);
   const [hardwareInfo, setHardwareInfo] = useState(null);
   const [showShardInfo, setShowShardInfo] = useState(false);
+  const [seederLogs, setSeederLogs] = useState([]);
+  const [showLogs, setShowLogs] = useState(false);
 
   // Reset only UI transient state, preserve sharing state
   const resetModalState = () => {
@@ -225,25 +237,25 @@ function ShareGpuModal({ isOpen, onClose }) {
   }, []);
 
   // Fetch hardware info and extract VRAM
-  useEffect(() => {
-    const fetchHardwareInfo = async () => {
-      try {
-        console.log('[GPU-VRAM] Fetching hardware info...');
-        const info = await getHardwareInfo();
-        setHardwareInfo(info);
+  // useEffect(() => {
+  //   const fetchHardwareInfo = async () => {
+  //     try {
+  //       console.log('[GPU-VRAM] Fetching hardware info...');
+  //       const info = await getHardwareInfo();
+  //       setHardwareInfo(info);
         
-        const vram = extractVramFromGpuInfo(info.gpu_info);
-        console.log('[GPU-VRAM] Extracted VRAM:', vram, 'GB from:', info.gpu_info);
-        setGpuVram(vram);
-      } catch (error) {
-        console.error('[GPU-VRAM] Failed to fetch hardware info:', error);
-      }
-    };
+  //       const vram = extractVramFromGpuInfo(info.gpu_info);
+  //       console.log('[GPU-VRAM] Extracted VRAM:', vram, 'GB from:', info.gpu_info);
+  //       setGpuVram(vram);
+  //     } catch (error) {
+  //       console.error('[GPU-VRAM] Failed to fetch hardware info:', error);
+  //     }
+  //   };
 
-    if (isOpen) {
-      fetchHardwareInfo();
-    }
-  }, [isOpen]);
+  //   if (isOpen) {
+  //     fetchHardwareInfo();
+  //   }
+  // }, [isOpen]);
 
   // Listen for WSL setup progress
   useEffect(() => {
@@ -355,6 +367,20 @@ function ShareGpuModal({ isOpen, onClose }) {
     setNodeToken(receivedToken);
     console.log("GPU Registered. Node Token:", receivedToken);
 
+    // *** ADD THIS: Extract hardware info from the registration process ***
+    if (!hardwareInfo) {
+      try {
+        const info = await getHardwareInfo();
+        setHardwareInfo(info);
+        const vram = extractVramFromGpuInfo(info.gpu_info);
+        console.log('[SHARE-GPU] Hardware info from registration:', info);
+        console.log('[SHARE-GPU] Detected max GPU VRAM:', vram, 'GB');
+        setGpuVram(vram);
+      } catch (error) {
+        console.error('[SHARE-GPU] Failed to get hardware info:', error);
+      }
+    }
+
     // Step 3: Start Petals seeder
     if (!isTauriEnvironment()) {
       const hostableShards = gpuVram 
@@ -384,6 +410,16 @@ function ShareGpuModal({ isOpen, onClose }) {
 
       console.log("[SHARE-GPU] Petals seeder started:", seederResult);
       
+      // *** ADD: Wait a moment and verify seeder is actually running ***
+      await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds
+      
+      const isRunning = await invoke('is_petals_seeder_running');
+      if (!isRunning) {
+        throw new Error('Seeder process terminated unexpectedly. Check logs for errors.');
+      }
+      
+      console.log("[SHARE-GPU] Seeder verified running");
+      
       // Calculate and show shard contribution info
       const hostableShards = gpuVram 
         ? calculateHostableShards(gpuVram, modelInfo.vramPerShard) 
@@ -401,6 +437,9 @@ function ShareGpuModal({ isOpen, onClose }) {
         }
       }
       
+      // *** ADD: More detailed success message with network info ***
+      successMessage += '. Note: It may take 2-5 minutes for your node to be discoverable on the Petals network.';
+      
       setStatus('success');
       setActiveModelId(selectedModel);
       setMessage(successMessage);
@@ -408,8 +447,13 @@ function ShareGpuModal({ isOpen, onClose }) {
     } catch (error) {
       console.error("[SHARE-GPU] Failed to start Petals seeder:", error);
       setStatus('error-seeder');
-      setMessage(`Failed to start Petals: ${error}`);
+      setMessage(`Failed to start Petals: ${error.message || error}. Check console for details.`);
     }
+      
+      setStatus('success');
+      setActiveModelId(selectedModel);
+      setMessage(successMessage);
+      
   };
 
   const handleStop = async () => {
@@ -444,6 +488,20 @@ function ShareGpuModal({ isOpen, onClose }) {
       setMessage(`Failed to de-register: ${deregisterResult.message}`);
     }
   };
+
+  const fetchSeederLogs = async () => {
+  if (!isTauriEnvironment()) return;
+  
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const logs = await invoke('get_petals_seeder_logs');
+    setSeederLogs(logs);
+    setShowLogs(true);
+    console.log('[SEEDER-LOGS]', logs);
+  } catch (error) {
+    console.error('[SEEDER-LOGS] Failed to fetch logs:', error);
+  }
+};
 
   const handleClose = () => {
     if (status !== 'loading-register' && status !== 'loading-seeder' && 
@@ -758,6 +816,63 @@ function ShareGpuModal({ isOpen, onClose }) {
                 <p style={{ margin: '0 0 0.5rem 0', color: '#1e8e3e', fontWeight: '500' }}>
                   ✓ Your GPU is contributing to the decentralized AI network
                 </p>
+                {status === 'success' && (
+  <div style={{
+    backgroundColor: '#e6f4ea',
+    padding: '0.75rem',
+    borderRadius: '6px',
+    marginTop: '1rem',
+    fontSize: '0.9em',
+    textAlign: 'left'
+  }}>
+    <p style={{ margin: '0 0 0.5rem 0', color: '#1e8e3e', fontWeight: '500' }}>
+      ✓ Your GPU is contributing to the decentralized AI network
+    </p>
+    {selectedModelInfo && hostableShards !== null && (
+      <p style={{ margin: 0, color: '#1e8e3e', fontSize: '0.95em' }}>
+        Hosting capacity: ~{hostableShards} of {selectedModelInfo.totalShards} shards 
+        ({Math.round((hostableShards / selectedModelInfo.totalShards) * 100)}%)
+      </p>
+    )}
+    
+    {/* *** ADD THIS: Logs button *** */}
+    <button
+      onClick={fetchSeederLogs}
+      style={{
+        marginTop: '0.5rem',
+        padding: '0.4rem 0.8rem',
+        fontSize: '0.85em',
+        backgroundColor: '#34a853',
+        color: 'white',
+        border: 'none',
+        borderRadius: '4px',
+        cursor: 'pointer'
+      }}
+    >
+      {showLogs ? 'Refresh Logs' : 'View Seeder Logs'}
+    </button>
+    
+    {showLogs && seederLogs.length > 0 && (
+      <div style={{
+        marginTop: '0.5rem',
+        padding: '0.5rem',
+        backgroundColor: '#f8f9fa',
+        borderRadius: '4px',
+        maxHeight: '200px',
+        overflow: 'auto',
+        fontSize: '0.75em',
+        fontFamily: 'monospace',
+        color: '#333'
+      }}>
+        {seederLogs.slice(-20).map((log, idx) => (
+          <div key={idx} style={{ marginBottom: '2px' }}>
+            {log}
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+)}
                 {selectedModelInfo && hostableShards !== null && (
                   <p style={{ margin: 0, color: '#1e8e3e', fontSize: '0.95em' }}>
                     Hosting capacity: ~{hostableShards} of {selectedModelInfo.totalShards} shards 

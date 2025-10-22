@@ -1,55 +1,211 @@
 // src/components/ShareGpuModal.jsx
 import React, { useState, useEffect } from 'react';
 import { collectAndSendHardwareInfo, deregisterGpuNode } from '../utils/hardwareService';
-import { X, CheckCircle, AlertTriangle, Loader, PowerOff, Download } from 'lucide-react';
+import { getHardwareInfo } from '../utils/hardwareService';
+import { X, CheckCircle, AlertTriangle, Loader, PowerOff, Download, Info } from 'lucide-react';
 import { isTauriEnvironment } from '../utils/tauriHelpers';
 
-// Latest Petals-supported models (October 2025)
-// Source: Petals v2.2.0 release & official site (https://petals.dev, https://github.com/bigscience-workshop/petals)
-
+// Enhanced model metadata with shard information
 const supportedModels = [
-  // Popular LLaMA-family models
-  { id: 'petals-team/StableBeluga2', name: 'StableBeluga2 7B', vram: 8 },
-  { id: 'meta-llama/Llama-2-70b-chat-hf', name: 'LLaMA 2 70B Chat', vram: 40 },
-  { id: 'enoch/llama-65b-hf', name: 'LLaMA 65B', vram: 35 },
-  { id: 'meta-llama/Meta-Llama-3.1-8B', name: 'LLaMA 3.1 8B', vram: 10 },
-  { id: 'meta-llama/Meta-Llama-3.1-405B', name: 'LLaMA 3.1 405B (Distributed)', vram: 80 },
-
-  // Falcon models
-  { id: 'tiiuae/falcon-40b-instruct', name: 'Falcon 40B Instruct', vram: 40 },
-  { id: 'tiiuae/falcon-180b-chat', name: 'Falcon 180B Chat', vram: 80 },
-
-  // BLOOM family
-  { id: 'bigscience/bloom', name: 'BLOOM 176B', vram: 40 },
-  { id: 'bigscience/bloomz-petals', name: 'BLOOMZ 176B (Instruction-Tuned)', vram: 40 },
-
-  // Mixtral (Mixture-of-Experts)
-  { id: 'mistralai/Mixtral-8x22B', name: 'Mixtral 8x22B', vram: 50 },
-
-  // Small models suitable for hosting on low-VRAM GPUs (~2 GB)
-  { id: 'google/gemma-2-2b', name: 'Gemma 2 2B (Google)', vram: 2 },
-  { id: 'google/gemma-1.1-2b-it', name: 'Gemma 1.1 2B Instruct', vram: 2 },
-  { id: 'Qwen/Qwen2-1.5B-Instruct', name: 'Qwen2 1.5B Instruct', vram: 2 },
-  { id: 'stabilityai/StableLM-2-1_6B', name: 'StableLM 2 1.6B', vram: 2 },
-  { id: 'indexai/index-1.9b', name: 'Index 1.9B Small', vram: 2 },
-  { id: 'microsoft/phi-3-mini-3.8b', name: 'Phi-3 Mini 3.8B', vram: 2 },
-  { id: 'microsoft/phi-2', name: 'Phi-2 Small (1.3B)', vram: 1.5 },
-  { id: 'TinyLlama/TinyLlama-1.1B', name: 'TinyLlama 1.1B Base', vram: 2 },
-  { id: 'TinyLlama/TinyLlama-1.1B-Chat-v1.0', name: 'TinyLlama 1.1B Chat', vram: 2 }
-
+  // Small models (1-2 shards, suitable for low VRAM)
+  { 
+    id: 'google/gemma-2-2b', 
+    name: 'Gemma 2 2B', 
+    totalShards: 1,
+    vramPerShard: 2.0,
+    totalModelSize: 2.0,
+    description: 'Lightweight Google model, runs on single GPU'
+  },
+  { 
+    id: 'TinyLlama/TinyLlama-1.1B-Chat-v1.0', 
+    name: 'TinyLlama 1.1B Chat', 
+    totalShards: 1,
+    vramPerShard: 1.5,
+    totalModelSize: 1.5,
+    description: 'Ultra-lightweight chat model'
+  },
+  { 
+    id: 'microsoft/phi-3-mini-3.8b', 
+    name: 'Phi-3 Mini 3.8B', 
+    totalShards: 2,
+    vramPerShard: 2.0,
+    totalModelSize: 4.0,
+    description: 'Efficient small model from Microsoft'
+  },
+  
+  // Medium models (4-8 shards)
+  { 
+    id: 'petals-team/StableBeluga2', 
+    name: 'StableBeluga2 7B', 
+    totalShards: 4,
+    vramPerShard: 2.5,
+    totalModelSize: 8.0,
+    description: 'Popular 7B parameter model, distributed across 4 shards'
+  },
+  { 
+    id: 'meta-llama/Meta-Llama-3.1-8B', 
+    name: 'LLaMA 3.1 8B', 
+    totalShards: 4,
+    vramPerShard: 3.0,
+    totalModelSize: 10.0,
+    description: 'Meta\'s efficient 8B model'
+  },
+  
+  // Large models (16-32 shards)
+  { 
+    id: 'tiiuae/falcon-40b-instruct', 
+    name: 'Falcon 40B Instruct', 
+    totalShards: 16,
+    vramPerShard: 3.0,
+    totalModelSize: 40.0,
+    description: 'Large instruction-tuned model, 16 shards'
+  },
+  { 
+    id: 'meta-llama/Llama-2-70b-chat-hf', 
+    name: 'LLaMA 2 70B Chat', 
+    totalShards: 28,
+    vramPerShard: 3.5,
+    totalModelSize: 70.0,
+    description: 'Very large chat model, requires network participation'
+  },
+  { 
+    id: 'bigscience/bloom', 
+    name: 'BLOOM 176B', 
+    totalShards: 64,
+    vramPerShard: 3.0,
+    totalModelSize: 176.0,
+    description: 'Massive multilingual model, 64 shards across network'
+  },
+  
+  // Extreme scale models
+  { 
+    id: 'tiiuae/falcon-180b-chat', 
+    name: 'Falcon 180B Chat', 
+    totalShards: 72,
+    vramPerShard: 3.0,
+    totalModelSize: 180.0,
+    description: 'One of the largest open models, 72 shards'
+  },
+  { 
+    id: 'meta-llama/Meta-Llama-3.1-405B', 
+    name: 'LLaMA 3.1 405B', 
+    totalShards: 144,
+    vramPerShard: 3.5,
+    totalModelSize: 405.0,
+    description: 'Ultra-large distributed model, 144 shards'
+  },
 ];
+
+// Helper to calculate how many shards a GPU can host
+function calculateHostableShards(gpuVramGB, vramPerShard) {
+  if (!gpuVramGB || gpuVramGB <= 0) return 0;
+  const usableVram = Math.max(0, gpuVramGB - 0.5);
+  return Math.floor(usableVram / vramPerShard);
+}
+
+// Helper to extract VRAM from GPU info string
+function extractVramFromGpuInfo(gpuInfoArray) {
+  if (!Array.isArray(gpuInfoArray) || gpuInfoArray.length === 0) {
+    return null;
+  }
+  
+  const gpuString = gpuInfoArray.join(' ');
+  
+  const vramPatterns = [
+    /(\d+(?:\.\d+)?)\s*GB\s*VRAM/i,
+    /\((\d+(?:\.\d+)?)\s*GB\)/i,
+    /(\d+(?:\.\d+)?)\s*GB/i,
+  ];
+  
+  for (const pattern of vramPatterns) {
+    const match = gpuString.match(pattern);
+    if (match && match[1]) {
+      return parseFloat(match[1]);
+    }
+  }
+  
+  return null;
+}
 
 function ShareGpuModal({ isOpen, onClose }) {
   const [selectedModel, setSelectedModel] = useState(supportedModels[0].id);
   const [status, setStatus] = useState('idle');
   const [message, setMessage] = useState('');
   const [nodeToken, setNodeToken] = useState(null);
+  const [activeModelId, setActiveModelId] = useState(null); // Track actively shared model
   const [isWindows, setIsWindows] = useState(false);
   const [wslSetupProgress, setWslSetupProgress] = useState({ stage: '', message: '', progress: 0 });
   const [wslSetupComplete, setWslSetupComplete] = useState(false);
+  const [gpuVram, setGpuVram] = useState(null);
+  const [hardwareInfo, setHardwareInfo] = useState(null);
+  const [showShardInfo, setShowShardInfo] = useState(false);
 
+  // Reset only UI transient state, preserve sharing state
+  const resetModalState = () => {
+    // Only reset if not actively sharing
+    if (status !== 'success') {
+      setSelectedModel(supportedModels[0].id);
+      setStatus('idle');
+      setMessage('');
+      setNodeToken(null);
+      setActiveModelId(null);
+    }
+    setWslSetupProgress({ stage: '', message: '', progress: 0 });
+    setShowShardInfo(false);
+  };
+
+  // Check if currently sharing when modal opens
   useEffect(() => {
-    // Detect Windows
+    const checkSharingStatus = async () => {
+      if (!isOpen || !isTauriEnvironment()) return;
+      
+      try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const isRunning = await invoke('is_petals_seeder_running');
+        
+        if (isRunning) {
+          // Get the model that's currently being shared
+          const modelInfo = await invoke('get_petals_seeder_info');
+          
+          if (modelInfo) {
+            console.log('[MODAL] Detected active sharing:', modelInfo);
+            setActiveModelId(modelInfo);
+            setSelectedModel(modelInfo);
+            setStatus('success');
+            
+            const model = supportedModels.find(m => m.id === modelInfo);
+            if (model && gpuVram !== null) {
+              const hostableShards = calculateHostableShards(gpuVram, model.vramPerShard);
+              let msg = `Currently sharing ${model.name}`;
+              if (hostableShards !== null) {
+                if (hostableShards >= model.totalShards) {
+                  msg += ` (hosting all ${model.totalShards} shards)`;
+                } else if (hostableShards === 1) {
+                  msg += ` (hosting 1 of ${model.totalShards} shards)`;
+                } else {
+                  msg += ` (hosting ~${hostableShards} of ${model.totalShards} shards)`;
+                }
+              }
+              setMessage(msg);
+            } else {
+              setMessage(`Currently sharing ${model?.name || modelInfo}`);
+            }
+            // Set a placeholder token since we're already sharing
+            setNodeToken('active');
+          }
+        }
+      } catch (error) {
+        console.error('[MODAL] Failed to check sharing status:', error);
+      }
+    };
+
+    if (isOpen) {
+      checkSharingStatus();
+    }
+  }, [isOpen, gpuVram]);
+
+  // Detect platform
+  useEffect(() => {
     const checkPlatform = async () => {
       if (isTauriEnvironment()) {
         try {
@@ -59,7 +215,6 @@ function ShareGpuModal({ isOpen, onClose }) {
           setIsWindows(platformName === 'windows');
         } catch (error) {
           console.error('[PLATFORM] Failed to detect platform:', error);
-          // Fallback: check user agent
           const isWindowsFallback = navigator.userAgent.includes('Windows');
           console.log('[PLATFORM] Fallback detection, Windows:', isWindowsFallback);
           setIsWindows(isWindowsFallback);
@@ -69,8 +224,29 @@ function ShareGpuModal({ isOpen, onClose }) {
     checkPlatform();
   }, []);
 
+  // Fetch hardware info and extract VRAM
   useEffect(() => {
-    // Listen for WSL setup progress
+    const fetchHardwareInfo = async () => {
+      try {
+        console.log('[GPU-VRAM] Fetching hardware info...');
+        const info = await getHardwareInfo();
+        setHardwareInfo(info);
+        
+        const vram = extractVramFromGpuInfo(info.gpu_info);
+        console.log('[GPU-VRAM] Extracted VRAM:', vram, 'GB from:', info.gpu_info);
+        setGpuVram(vram);
+      } catch (error) {
+        console.error('[GPU-VRAM] Failed to fetch hardware info:', error);
+      }
+    };
+
+    if (isOpen) {
+      fetchHardwareInfo();
+    }
+  }, [isOpen]);
+
+  // Listen for WSL setup progress
+  useEffect(() => {
     if (!isTauriEnvironment()) return;
 
     let unlisten;
@@ -106,7 +282,6 @@ function ShareGpuModal({ isOpen, onClose }) {
       const result = await invoke('setup_wsl_environment');
       console.log('[WSL-SETUP] Setup completed:', result);
       
-      // Mark setup as complete
       await invoke('mark_wsl_setup_complete');
       setWslSetupComplete(true);
       
@@ -132,7 +307,34 @@ function ShareGpuModal({ isOpen, onClose }) {
       return;
     }
 
-    // Step 1: Register hardware
+    // Get selected model info
+    const modelInfo = supportedModels.find(m => m.id === selectedModel);
+    if (!modelInfo) {
+      setStatus('error-register');
+      setMessage('Invalid model selected.');
+      return;
+    }
+
+    // Step 1: Validate GPU capability
+    if (gpuVram !== null) {
+      const hostableShards = calculateHostableShards(gpuVram, modelInfo.vramPerShard);
+      
+      if (hostableShards === 0) {
+        setStatus('error-register');
+        setMessage(
+          `Your GPU (${gpuVram.toFixed(1)}GB VRAM) cannot host any shard of ${modelInfo.name}. ` +
+          `Each shard requires ${modelInfo.vramPerShard}GB VRAM. ` +
+          `Please select a model with lower VRAM requirements.`
+        );
+        return;
+      }
+      
+      console.log(`[GPU-VALIDATION] GPU can host ${hostableShards} of ${modelInfo.totalShards} shards`);
+    } else {
+      console.warn('[GPU-VALIDATION] Could not determine GPU VRAM, proceeding without validation');
+    }
+
+    // Step 2: Register hardware
     setStatus('loading-register');
     setMessage('Registering your GPU with the network...');
     setNodeToken(null);
@@ -153,10 +355,19 @@ function ShareGpuModal({ isOpen, onClose }) {
     setNodeToken(receivedToken);
     console.log("GPU Registered. Node Token:", receivedToken);
 
-    // Step 2: Start Petals seeder
+    // Step 3: Start Petals seeder
     if (!isTauriEnvironment()) {
+      const hostableShards = gpuVram 
+        ? calculateHostableShards(gpuVram, modelInfo.vramPerShard) 
+        : '?';
+      
       setStatus('success');
-      setMessage('GPU registered successfully. (Petals seeder only works in desktop app)');
+      setActiveModelId(selectedModel);
+      setMessage(
+        `GPU registered successfully for ${modelInfo.name}. ` +
+        (gpuVram ? `Your GPU can host approximately ${hostableShards} of ${modelInfo.totalShards} shards. ` : '') +
+        `(Petals seeder only works in desktop app)`
+      );
       return;
     }
 
@@ -172,8 +383,27 @@ function ShareGpuModal({ isOpen, onClose }) {
       });
 
       console.log("[SHARE-GPU] Petals seeder started:", seederResult);
+      
+      // Calculate and show shard contribution info
+      const hostableShards = gpuVram 
+        ? calculateHostableShards(gpuVram, modelInfo.vramPerShard) 
+        : null;
+      
+      let successMessage = `Successfully sharing ${modelInfo.name}`;
+      
+      if (hostableShards !== null) {
+        if (hostableShards >= modelInfo.totalShards) {
+          successMessage += ` (hosting all ${modelInfo.totalShards} shards)`;
+        } else if (hostableShards === 1) {
+          successMessage += ` (hosting 1 of ${modelInfo.totalShards} shards)`;
+        } else {
+          successMessage += ` (hosting ~${hostableShards} of ${modelInfo.totalShards} shards)`;
+        }
+      }
+      
       setStatus('success');
-      setMessage(`Your GPU is now serving ${supportedModels.find(m => m.id === selectedModel)?.name || selectedModel} to the Petals network!`);
+      setActiveModelId(selectedModel);
+      setMessage(successMessage);
       
     } catch (error) {
       console.error("[SHARE-GPU] Failed to start Petals seeder:", error);
@@ -208,6 +438,7 @@ function ShareGpuModal({ isOpen, onClose }) {
       setStatus('idle');
       setMessage('GPU sharing stopped successfully.');
       setNodeToken(null);
+      setActiveModelId(null);
     } else {
       setStatus('error-stop');
       setMessage(`Failed to de-register: ${deregisterResult.message}`);
@@ -219,9 +450,11 @@ function ShareGpuModal({ isOpen, onClose }) {
         status !== 'loading-stop' && status !== 'wsl-setup') {
       if (status === 'error-stop') {
         setStatus('success');
-      } else {
-        onClose();
+      } else if (status !== 'success') {
+        // Only reset if not actively sharing
+        resetModalState();
       }
+      onClose();
     }
   };
 
@@ -231,6 +464,12 @@ function ShareGpuModal({ isOpen, onClose }) {
                     status === 'loading-stop' || status === 'wsl-setup';
   const isSharing = status === 'success' || status === 'error-stop' || 
                     status === 'loading-stop' || status === 'error-seeder';
+
+  // Get selected model info for display
+  const selectedModelInfo = supportedModels.find(m => m.id === selectedModel);
+  const hostableShards = (selectedModelInfo && gpuVram !== null) 
+    ? calculateHostableShards(gpuVram, selectedModelInfo.vramPerShard)
+    : null;
 
   return (
     <div className="modal-overlay">
@@ -261,15 +500,7 @@ function ShareGpuModal({ isOpen, onClose }) {
                 First-Time Setup Required
               </h4>
               <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9em', color: '#856404' }}>
-                To run Petals on Windows, we need to set up a Linux environment (WSL). This is a one-time process that will:
-              </p>
-              <ul style={{ margin: '0 0 0.5rem 0', paddingLeft: '1.5rem', fontSize: '0.85em', color: '#856404' }}>
-                <li>Install Windows Subsystem for Linux (if needed)</li>
-                <li>Set up Python and required libraries</li>
-                <li>Install the Petals framework</li>
-              </ul>
-              <p style={{ margin: '0', fontSize: '0.85em', color: '#856404' }}>
-                This may take 5-10 minutes depending on your internet connection.
+                To run Petals on Windows, we need to set up a Linux environment (WSL). This is a one-time process.
               </p>
             </div>
             <button 
@@ -295,7 +526,6 @@ function ShareGpuModal({ isOpen, onClose }) {
             </p>
             <p style={{ fontSize: '0.9em', color: '#666' }}>{wslSetupProgress.message}</p>
             
-            {/* Progress Bar */}
             <div style={{
               width: '100%',
               height: '8px',
@@ -317,32 +547,158 @@ function ShareGpuModal({ isOpen, onClose }) {
           </div>
         )}
 
-        {/* WSL Setup Complete */}
-        {status === 'wsl-ready' && (
+        {/* Idle State - Model Selection */}
+        {(status === 'idle' || status === 'wsl-ready' || status === 'error-register') && (!isWindows || wslSetupComplete) && (
           <>
-            <div className="status-display">
-              <CheckCircle size={48} color="#28a745" />
-              <p style={{ color: '#28a745', marginTop: '1rem' }}>{message}</p>
+            {/* Info banner about Petals sharding */}
+            <div style={{
+              backgroundColor: '#e8f4fd',
+              border: '1px solid #b3d9f2',
+              borderRadius: '6px',
+              padding: '0.75rem',
+              marginBottom: '1rem',
+              fontSize: '0.85em',
+              color: '#1565c0'
+            }}>
+              <strong>How Petals Works:</strong> Large AI models are split into shards distributed across the network. 
+              Even GPUs with limited VRAM can contribute by hosting one or more shards.
             </div>
-            <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '1rem' }}>
-              Select a model to host on the Petals network:
-            </p>
+
+            {status === 'error-register' && (
+              <div className="status-display error">
+                <AlertTriangle size={20} style={{ marginRight: '8px', flexShrink: 0 }}/>
+                <p style={{ margin: 0 }}>{message}</p>
+              </div>
+            )}
+
+            {/* GPU VRAM Info */}
+            {gpuVram !== null && (
+              <div style={{
+                backgroundColor: '#f0f2f5',
+                padding: '0.75rem',
+                borderRadius: '6px',
+                marginBottom: '1rem',
+                fontSize: '0.9em'
+              }}>
+                <strong>Your GPU:</strong> {gpuVram.toFixed(1)}GB VRAM detected
+              </div>
+            )}
+
             <div className="form-group">
-              <label htmlFor="model-select">Choose model:</label>
+              <label htmlFor="model-select">Choose model to host:</label>
               <select
                 id="model-select"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
+                disabled={isLoading}
+                style={{ marginBottom: '0.5rem' }}
               >
-                {supportedModels.map(model => (
-                  <option key={model.id} value={model.id}>
-                    {model.name} (~{model.vram}GB VRAM)
-                  </option>
-                ))}
+                {supportedModels.map(model => {
+                  const canHost = gpuVram !== null 
+                    ? calculateHostableShards(gpuVram, model.vramPerShard) > 0
+                    : true;
+                  
+                  return (
+                    <option 
+                      key={model.id} 
+                      value={model.id}
+                      disabled={!canHost}
+                      style={{
+                        backgroundColor: canHost ? '#ffffff' : '#f5f5f5',
+                        color: canHost ? '#000000' : '#999999',
+                        fontWeight: canHost ? '500' : '400',
+                      }}
+                    >
+                      {canHost ? '✓ ' : '✗ '}
+                      {model.name} ({model.totalShards} shards, {model.vramPerShard}GB/shard)
+                      {!canHost && ' - Insufficient VRAM'}
+                    </option>
+                  );
+                })}
               </select>
+
+              {/* Shard info for selected model */}
+              {selectedModelInfo && (
+                <div style={{
+                  backgroundColor: '#f8f9fa',
+                  padding: '0.75rem',
+                  borderRadius: '6px',
+                  fontSize: '0.85em',
+                  border: '1px solid #dee2e6'
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ marginBottom: '0.5rem' }}>
+                        <strong>{selectedModelInfo.name}</strong>
+                      </div>
+                      <div style={{ color: '#666', marginBottom: '0.25rem' }}>
+                        • Total size: {selectedModelInfo.totalModelSize}GB
+                      </div>
+                      <div style={{ color: '#666', marginBottom: '0.25rem' }}>
+                        • Shards: {selectedModelInfo.totalShards} total
+                      </div>
+                      <div style={{ color: '#666', marginBottom: '0.25rem' }}>
+                        • VRAM per shard: {selectedModelInfo.vramPerShard}GB
+                      </div>
+                      {hostableShards !== null && (
+                        <div style={{ 
+                          marginTop: '0.5rem', 
+                          padding: '0.5rem',
+                          backgroundColor: hostableShards > 0 ? '#d4edda' : '#f8d7da',
+                          borderRadius: '4px',
+                          color: hostableShards > 0 ? '#155724' : '#721c24',
+                          fontWeight: '500'
+                        }}>
+                          {hostableShards > 0 ? (
+                            <>✓ Your GPU can host ~{hostableShards} shard{hostableShards !== 1 ? 's' : ''}</>
+                          ) : (
+                            <>✗ Your GPU cannot host any shard of this model</>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => setShowShardInfo(!showShardInfo)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        padding: '4px',
+                        color: '#1a73e8'
+                      }}
+                      title="Show more info"
+                    >
+                      <Info size={18} />
+                    </button>
+                  </div>
+
+                  {showShardInfo && (
+                    <div style={{
+                      marginTop: '0.75rem',
+                      paddingTop: '0.75rem',
+                      borderTop: '1px solid #dee2e6',
+                      fontSize: '0.9em',
+                      color: '#495057'
+                    }}>
+                      <p style={{ margin: '0 0 0.5rem 0' }}>{selectedModelInfo.description}</p>
+                      {hostableShards !== null && hostableShards > 0 && hostableShards < selectedModelInfo.totalShards && (
+                        <p style={{ margin: 0, fontStyle: 'italic' }}>
+                          You'll be contributing a partial hosting ({Math.round((hostableShards / selectedModelInfo.totalShards) * 100)}% of model capacity). 
+                          The network combines contributions from multiple hosts to serve the full model.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-            <button className="modal-action-btn primary" onClick={handleShare}>
-              Start Sharing
+
+            <button 
+              className="modal-action-btn primary" 
+              onClick={handleShare} 
+              disabled={isLoading || (hostableShards !== null && hostableShards === 0)}
+            >
+              {status === 'error-register' ? 'Try Again' : 'Start Sharing'}
             </button>
             <button className="modal-action-btn secondary" onClick={handleClose}>
               Cancel
@@ -350,7 +706,7 @@ function ShareGpuModal({ isOpen, onClose }) {
           </>
         )}
 
-        {/* WSL Setup Error */}
+        {/* WSL Error */}
         {status === 'wsl-error' && (
           <>
             <div className="status-display error">
@@ -366,47 +722,11 @@ function ShareGpuModal({ isOpen, onClose }) {
           </>
         )}
 
-        {/* Idle State (non-Windows or WSL already set up) */}
-        {(status === 'idle' && (!isWindows || wslSetupComplete)) || status === 'error-register' && (
-          <>
-            <p>Select a model to host. Your computer will contribute processing power to the Petals network.</p>
-            {status === 'error-register' && (
-              <div className="status-display error">
-                <AlertTriangle size={20} style={{ marginRight: '8px', flexShrink: 0 }}/>
-                <p style={{ margin: 0 }}>{message}</p>
-              </div>
-            )}
-            <div className="form-group">
-              <label htmlFor="model-select">Choose model to host:</label>
-              <select
-                id="model-select"
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-                disabled={isLoading}
-              >
-                {supportedModels.map(model => (
-                  <option key={model.id} value={model.id}>
-                    {model.name} (~{model.vram}GB VRAM)
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button className="modal-action-btn primary" onClick={handleShare} disabled={isLoading}>
-              {status === 'error-register' ? 'Try Again' : 'Start Sharing'}
-            </button>
-            {status === 'error-register' && (
-              <button className="modal-action-btn secondary" onClick={handleClose}>
-                Cancel
-              </button>
-            )}
-          </>
-        )}
-
         {/* Loading States */}
         {isLoading && status !== 'wsl-setup' && (
           <div className="status-display">
             <Loader size={48} className="spinner" />
-            <p>
+            <p style={{ marginTop: '1rem' }}>
               {status === 'loading-register' && 'Registering your GPU...'}
               {status === 'loading-seeder' && 'Starting Petals seeder...'}
               {status === 'loading-stop' && 'Stopping seeder...'}
@@ -432,11 +752,18 @@ function ShareGpuModal({ isOpen, onClose }) {
                 padding: '0.75rem',
                 borderRadius: '6px',
                 marginTop: '1rem',
-                fontSize: '0.9em'
+                fontSize: '0.9em',
+                textAlign: 'left'
               }}>
-                <p style={{ margin: 0, color: '#1e8e3e' }}>
+                <p style={{ margin: '0 0 0.5rem 0', color: '#1e8e3e', fontWeight: '500' }}>
                   ✓ Your GPU is contributing to the decentralized AI network
                 </p>
+                {selectedModelInfo && hostableShards !== null && (
+                  <p style={{ margin: 0, color: '#1e8e3e', fontSize: '0.95em' }}>
+                    Hosting capacity: ~{hostableShards} of {selectedModelInfo.totalShards} shards 
+                    ({Math.round((hostableShards / selectedModelInfo.totalShards) * 100)}%)
+                  </p>
+                )}
               </div>
             )}
             <button 
@@ -457,7 +784,7 @@ function ShareGpuModal({ isOpen, onClose }) {
               onClick={handleClose} 
               disabled={isLoading}
             >
-              {status === 'success' ? 'Close' : 'Close'}
+              Close (Keep Sharing)
             </button>
           </div>
         )}
@@ -467,3 +794,4 @@ function ShareGpuModal({ isOpen, onClose }) {
 }
 
 export default ShareGpuModal;
+

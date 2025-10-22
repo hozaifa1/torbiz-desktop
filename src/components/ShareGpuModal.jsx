@@ -419,14 +419,14 @@ function ShareGpuModal({ isOpen, onClose }) {
       }
       
       console.log("[SHARE-GPU] Seeder verified running");
-      
+
       // Calculate and show shard contribution info
-      const hostableShards = gpuVram 
-        ? calculateHostableShards(gpuVram, modelInfo.vramPerShard) 
+      const hostableShards = gpuVram
+        ? calculateHostableShards(gpuVram, modelInfo.vramPerShard)
         : null;
-      
-      let successMessage = `Successfully sharing ${modelInfo.name}`;
-      
+
+      let successMessage = `Successfully sharing ${modelInfo.name}`; // Define here
+
       if (hostableShards !== null) {
         if (hostableShards >= modelInfo.totalShards) {
           successMessage += ` (hosting all ${modelInfo.totalShards} shards)`;
@@ -436,25 +436,31 @@ function ShareGpuModal({ isOpen, onClose }) {
           successMessage += ` (hosting ~${hostableShards} of ${modelInfo.totalShards} shards)`;
         }
       }
-      
-      // *** ADD: More detailed success message with network info ***
+
+      // More detailed success message with network info
       successMessage += '. Note: It may take 2-5 minutes for your node to be discoverable on the Petals network.';
-      
+
+      // *** FIX: Move these lines INSIDE the try block ***
       setStatus('success');
       setActiveModelId(selectedModel);
-      setMessage(successMessage);
-      
+      setMessage(successMessage); // Now successMessage is defined
+
     } catch (error) {
       console.error("[SHARE-GPU] Failed to start Petals seeder:", error);
       setStatus('error-seeder');
       setMessage(`Failed to start Petals: ${error.message || error}. Check console for details.`);
+      // *** REMOVE these lines from here if they were misplaced ***
+      // setStatus('success');
+      // setActiveModelId(selectedModel);
+      // setMessage(successMessage); // successMessage wouldn't be defined here anyway in case of error
     }
-      
-      setStatus('success');
-      setActiveModelId(selectedModel);
-      setMessage(successMessage);
-      
-  };
+
+    // *** REMOVE these lines from here ***
+    // setStatus('success');
+    // setActiveModelId(selectedModel);
+    // setMessage(successMessage); // THIS IS LINE 455 - successMessage might not be defined here if an error occurred
+
+  }; // end of handleShare
 
   const handleStop = async () => {
     if (!nodeToken) {

@@ -13,10 +13,12 @@ import torch
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='[PETALS-SEEDER] %(asctime)s - %(levelname)s - %(message)s',
+    # vvv THIS LINE IS CORRECTED vvv
+    format="[PETALS-SEEDER] %(asctime)s - %(levelname)s - %(message)s",
+    # ^^^ THIS LINE IS CORRECTED ^^^
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler('petals_seeder.log')
+        logging.FileHandler("petals_seeder.log")
     ]
 )
 logger = logging.getLogger(__name__)
@@ -29,30 +31,30 @@ DEFAULT_INITIAL_PEERS = [
 ]
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Run Petals model server')
-    parser.add_argument('--model-name', type=str, required=True,
-                        help='HuggingFace model name/ID to serve')
-    parser.add_argument('--node-token', type=str, required=True,
-                        help='Unique node token from Torbiz backend')
-    parser.add_argument('--device', type=str, default='cuda',
-                        help='Device to use (cuda, cpu)')
-    parser.add_argument('--port', type=int, default=31337,
-                        help='Port for P2P communication')
-    parser.add_argument('--initial-peers', nargs='+', default=DEFAULT_INITIAL_PEERS,
-                        help='Initial DHT peers to connect to')
+    parser = argparse.ArgumentParser(description="Run Petals model server")
+    parser.add_argument("--model-name", type=str, required=True,
+                        help="HuggingFace model name/ID to serve")
+    parser.add_argument("--node-token", type=str, required=True,
+                        help="Unique node token from Torbiz backend")
+    parser.add_argument("--device", type=str, default="cuda",
+                        help="Device to use (cuda, cpu)")
+    parser.add_argument("--port", type=int, default=31337,
+                        help="Port for P2P communication")
+    parser.add_argument("--initial-peers", nargs="+", default=DEFAULT_INITIAL_PEERS,
+                        help="Initial DHT peers to connect to")
     return parser.parse_args()
 
 def detect_available_device():
     """Detect the best available device"""
     if torch.cuda.is_available():
-        device = 'cuda'
+        device = "cuda"
         gpu_name = torch.cuda.get_device_name(0)
         gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         logger.info(f"CUDA available: {gpu_name} with {gpu_memory:.2f} GB VRAM")
         return device
     else:
         logger.warning("CUDA not available, falling back to CPU (performance will be limited)")
-        return 'cpu'
+        return "cpu"
 
 def main():
     args = parse_args()
@@ -67,9 +69,9 @@ def main():
     
     # Detect and configure device
     device = detect_available_device()
-    if device == 'cpu' and args.device == 'cuda':
+    if device == "cpu" and args.device == "cuda":
         logger.warning("Requested CUDA but not available, using CPU")
-        device = 'cpu'
+        device = "cpu"
     
     try:
         logger.info(f"Loading model: {args.model_name}")
@@ -81,7 +83,7 @@ def main():
             import socket
             import urllib.request
             # Simple connectivity test
-            urllib.request.urlopen('https://huggingface.co', timeout=5)
+            urllib.request.urlopen("https://huggingface.co", timeout=5)
             logger.info("✓ Network connectivity verified")
         except Exception as e:
             logger.warning(f"Network connectivity test failed: {e}")
@@ -95,11 +97,11 @@ def main():
             args.model_name,
             initial_peers=args.initial_peers,
             device=device,
-            torch_dtype=torch.float16 if device == 'cuda' else torch.float32,
+            torch_dtype=torch.float16 if device == "cuda" else torch.float32,
             # Use node token as server identity
             public_name=f"torbiz-{args.node_token[:12]}",
             # Configure for serving
-            mode='server',
+            mode="server",
             # Network configuration
             announce_maddrs=[f"/ip4/0.0.0.0/tcp/{args.port}"],
             # Performance tuning
@@ -151,7 +153,7 @@ def main():
         
     except RuntimeError as e:
         error_msg = str(e)
-        if 'CUDA' in error_msg or 'GPU' in error_msg:
+        if "CUDA" in error_msg or "GPU" in error_msg:
             logger.error(f"GPU-related error: {e}", exc_info=True)
             logger.error("Your GPU may not support the required operations")
             logger.error("Try running with --device cpu instead")
@@ -169,5 +171,5 @@ def main():
         logger.info("Server stopped - GPU is no longer being shared")
         logger.info("Thank you for contributing to the decentralized network!")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

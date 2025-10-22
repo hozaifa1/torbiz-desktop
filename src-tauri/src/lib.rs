@@ -10,6 +10,7 @@ use std::process::{Child, Command, Stdio};
 use tauri::path::BaseDirectory;
 use std::path::PathBuf;
 use std::io::{BufRead, BufReader};
+use std::thread;
 
 // ===== EXISTING STRUCTURES =====
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -29,6 +30,7 @@ pub struct PetalsState {
     model_name: Arc<Mutex<Option<String>>>,
     node_token: Arc<Mutex<Option<String>>>,
     wsl_setup_complete: Arc<Mutex<bool>>,
+    seeder_logs: Arc<Mutex<Vec<String>>>,
 }
 
 impl PetalsState {
@@ -38,6 +40,7 @@ impl PetalsState {
             model_name: Arc::new(Mutex::new(None)),
             node_token: Arc::new(Mutex::new(None)),
             wsl_setup_complete: Arc::new(Mutex::new(false)),
+            seeder_logs: Arc::new(Mutex::new(Vec::new())),
         }
     }
 }
@@ -209,9 +212,8 @@ async fn start_oauth_server(_app: tauri::AppHandle, window: tauri::Window) -> Re
     Err("Failed to find an available port for OAuth server".to_string())
 }
 
-// ===== NEW WSL HELPER FUNCTIONS =====
+// ===== WSL HELPER FUNCTIONS =====
 
-/// Check if WSL is installed
 #[cfg(target_os = "windows")]
 fn check_wsl_installed() -> bool {
     match Command::new("wsl").arg("--status").output() {
@@ -222,15 +224,13 @@ fn check_wsl_installed() -> bool {
 
 #[cfg(not(target_os = "windows"))]
 fn check_wsl_installed() -> bool {
-    false // WSL only exists on Windows
+    false
 }
 
-/// Install WSL with Ubuntu
 #[cfg(target_os = "windows")]
 fn install_wsl() -> Result<(), String> {
     println!("[WSL] Installing WSL...");
     
-    // Install WSL with default Ubuntu distribution
     let output = Command::new("wsl")
         .arg("--install")
         .arg("--no-launch")
@@ -251,7 +251,6 @@ fn install_wsl() -> Result<(), String> {
     Err("WSL installation is only supported on Windows".to_string())
 }
 
-/// Execute a command in WSL
 #[cfg(target_os = "windows")]
 fn execute_wsl_command(command: &str) -> Result<String, String> {
     let output = Command::new("wsl")
@@ -275,7 +274,6 @@ fn execute_wsl_command(_command: &str) -> Result<String, String> {
     Err("WSL commands are only supported on Windows".to_string())
 }
 
-/// Check if Python 3 is installed in WSL
 fn check_wsl_python() -> bool {
     #[cfg(target_os = "windows")]
     {
@@ -294,7 +292,6 @@ fn check_wsl_python() -> bool {
     false
 }
 
-/// Install Python and pip in WSL
 fn install_wsl_python() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
@@ -308,7 +305,6 @@ fn install_wsl_python() -> Result<(), String> {
     Err("Python installation in WSL is only supported on Windows".to_string())
 }
 
-/// Check if Petals is installed in WSL
 fn check_wsl_petals() -> bool {
     #[cfg(target_os = "windows")]
     {
@@ -328,37 +324,23 @@ fn check_wsl_petals() -> bool {
     false
 }
 
-/// Install Petals in WSL using virtual environment
 fn install_wsl_petals() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         println!("[WSL] Setting up Python virtual environment...");
-        
-        // Create a virtual environment in WSL home directory
         execute_wsl_command("python3 -m venv ~/.torbiz_venv")?;
         
         println!("[WSL] Installing Petals and dependencies in virtual environment...");
-        
-        // Upgrade pip in venv
         execute_wsl_command("~/.torbiz_venv/bin/pip install --upgrade pip")?;
         
-        // Install PyTorch first (with timeout and retries)
         println!("[WSL] Installing PyTorch (this may take several minutes)...");
         execute_wsl_command(
             "~/.torbiz_venv/bin/pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu"
         )?;
         
-        // Install Petals
         println!("[WSL] Installing Petals...");
         execute_wsl_command("~/.torbiz_venv/bin/pip install petals")?;
-        
-        // Install additional dependencies
         execute_wsl_command("~/.torbiz_venv/bin/pip install hivemind accelerate")?;
-        
-        // Create a wrapper script to use the venv
-        execute_wsl_command(
-            "echo '#!/bin/bash\n~/.torbiz_venv/bin/python3 \"$@\"' > ~/torbiz_python && chmod +x ~/torbiz_python"
-        )?;
         
         println!("[WSL] Petals installation completed");
         Ok(())
@@ -367,9 +349,29 @@ fn install_wsl_petals() -> Result<(), String> {
     Err("Petals installation in WSL is only supported on Windows".to_string())
 }
 
-// ===== NEW WSL SETUP COMMAND =====
+/// Copy the Python script to WSL filesystem
+#[cfg(target_os = "windows")]
+fn copy_script_to_wsl(script_path: &PathBuf) -> Result<String, String> {
+    // Read the script content
+    let script_content = std::fs::read_to_string(script_path)
+        .map_err(|e| format!("Failed to read script: {}", e))?;
+    
+    // Escape single quotes in the script content
+    let escaped_content = script_content.replace("'", "'\\''");
+    
+    // Write the script to WSL home directory
+    let wsl_script_path = "~/run_petals_seeder.py";
+    let write_command = format!("cat > {} << 'EOF'\n{}\nEOF", wsl_script_path, escaped_content);
+    
+    execute_wsl_command(&write_command)?;
+    execute_wsl_command(&format!("chmod +x {}", wsl_script_path))?;
+    
+    println!("[WSL] Script copied to: {}", wsl_script_path);
+    Ok(wsl_script_path.to_string())
+}
 
-/// Setup WSL environment for Petals
+// ===== WSL SETUP COMMAND =====
+
 #[tauri::command]
 async fn setup_wsl_environment(
     window: tauri::Window,
@@ -381,7 +383,6 @@ async fn setup_wsl_environment(
 
     #[cfg(target_os = "windows")]
     {
-        // Progress helper
         let emit_progress = |stage: &str, message: &str, progress: u8| {
             let _ = window.emit("wsl_setup_progress", SetupProgress {
                 stage: stage.to_string(),
@@ -390,25 +391,21 @@ async fn setup_wsl_environment(
             });
         };
 
-        // Step 1: Check if WSL is installed
         emit_progress("checking_wsl", "Checking WSL installation...", 10);
         if !check_wsl_installed() {
             emit_progress("installing_wsl", "Installing WSL (this may take a few minutes)...", 20);
             install_wsl()?;
             
-            // WSL requires a system restart after first installation
             emit_progress("wsl_installed", "WSL installed. System restart may be required.", 40);
             return Err("WSL has been installed but requires a system restart. Please restart your computer and try again.".to_string());
         }
 
-        // Step 2: Check Python
         emit_progress("checking_python", "Checking Python in WSL...", 50);
         if !check_wsl_python() {
             emit_progress("installing_python", "Installing Python in WSL...", 60);
             install_wsl_python()?;
         }
 
-        // Step 3: Check Petals
         emit_progress("checking_petals", "Checking Petals library...", 70);
         if !check_wsl_petals() {
             emit_progress("installing_petals", "Installing Petals library (this may take several minutes)...", 80);
@@ -422,7 +419,7 @@ async fn setup_wsl_environment(
 
 // ===== MODIFIED PETALS COMMANDS =====
 
-/// Start the Petals seeder process (with WSL support on Windows)
+/// Start the Petals seeder process with proper logging
 #[tauri::command]
 async fn start_petals_seeder(
     model_name: String,
@@ -440,7 +437,6 @@ async fn start_petals_seeder(
 
     #[cfg(target_os = "windows")]
     {
-        // On Windows, check if WSL is set up
         let wsl_ready = {
             let setup_guard = state.wsl_setup_complete.lock().unwrap();
             *setup_guard
@@ -450,17 +446,33 @@ async fn start_petals_seeder(
             return Err("WSL environment not set up. Please complete WSL setup first.".to_string());
         }
 
-        // Run Petals in WSL
         println!("[PETALS] Starting Petals in WSL...");
         println!("[PETALS] Model: {}", model_name);
         
-        // Use the virtual environment Python to run Petals
+        // Get the script path from resources
+        let script_path = app
+            .path()
+            .resolve("py/run_petals_seeder.py", BaseDirectory::Resource)
+            .map_err(|e| format!("Failed to resolve script path: {}", e))?;
+
+        if !script_path.exists() {
+            return Err(format!("Python script not found at: {}", script_path.display()));
+        }
+
+        // Copy script to WSL
+        let wsl_script_path = copy_script_to_wsl(&script_path)?;
+        
+        // Build the command to run the script in WSL with virtual environment
         let command = format!(
-            "source ~/.torbiz_venv/bin/activate && python3 -m petals.cli.run_server {} --device cuda --port 31337 2>&1",
-            model_name
+            "source ~/.torbiz_venv/bin/activate && python3 {} --model-name '{}' --node-token '{}' --device cuda --port 31337 2>&1",
+            wsl_script_path,
+            model_name,
+            node_token
         );
 
-        let child = Command::new("wsl")
+        println!("[PETALS] Running WSL command: {}", command);
+
+        let mut child = Command::new("wsl")
             .arg("-e")
             .arg("bash")
             .arg("-c")
@@ -473,7 +485,25 @@ async fn start_petals_seeder(
         let child_id = child.id();
         println!("[PETALS] Spawned WSL process with PID: {}", child_id);
 
-        // Store state
+        // Capture stdout/stderr for logging
+        if let Some(stdout) = child.stdout.take() {
+            let logs = state.seeder_logs.clone();
+            thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines() {
+                    if let Ok(line) = line {
+                        println!("[PETALS-OUT] {}", line);
+                        let mut logs_guard = logs.lock().unwrap();
+                        logs_guard.push(line);
+                        // Keep only last 100 lines
+                        if logs_guard.len() > 100 {
+                            logs_guard.remove(0);
+                        }
+                    }
+                }
+            });
+        }
+
         {
             let mut process_guard = state.process.lock().unwrap();
             *process_guard = Some(child);
@@ -497,7 +527,6 @@ async fn start_petals_seeder(
 
     #[cfg(not(target_os = "windows"))]
     {
-        // Native Linux/Mac execution (existing code)
         let python_exe = if cfg!(target_os = "macos") { "python3" } else { "python3" };
 
         let script_path = app
@@ -511,7 +540,7 @@ async fn start_petals_seeder(
 
         println!("[PETALS] Starting seeder with script: {}", script_path.display());
 
-        let child = Command::new(python_exe)
+        let mut child = Command::new(python_exe)
             .arg(script_path.to_str().ok_or("Invalid script path")?)
             .arg("--model-name")
             .arg(&model_name)
@@ -524,6 +553,24 @@ async fn start_petals_seeder(
 
         let child_id = child.id();
         println!("[PETALS] Spawned process with PID: {}", child_id);
+
+        // Capture stdout/stderr for logging
+        if let Some(stdout) = child.stdout.take() {
+            let logs = state.seeder_logs.clone();
+            thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines() {
+                    if let Ok(line) = line {
+                        println!("[PETALS-OUT] {}", line);
+                        let mut logs_guard = logs.lock().unwrap();
+                        logs_guard.push(line);
+                        if logs_guard.len() > 100 {
+                            logs_guard.remove(0);
+                        }
+                    }
+                }
+            });
+        }
 
         {
             let mut process_guard = state.process.lock().unwrap();
@@ -581,7 +628,6 @@ async fn stop_petals_seeder(
                 }
             }
 
-            // Wait with timeout
             use std::time::Duration;
             let timeout = Duration::from_secs(5);
             let start = std::time::Instant::now();
@@ -617,6 +663,8 @@ async fn stop_petals_seeder(
                 *model_guard = None;
                 let mut token_guard = state.node_token.lock().unwrap();
                 *token_guard = None;
+                let mut logs_guard = state.seeder_logs.lock().unwrap();
+                logs_guard.clear();
             }
 
             if let Some(model) = model_name {
@@ -669,7 +717,13 @@ async fn get_petals_seeder_info(state: tauri::State<'_, PetalsState>) -> Result<
     }
 }
 
-/// Mark WSL setup as complete
+/// Get recent seeder logs
+#[tauri::command]
+async fn get_petals_seeder_logs(state: tauri::State<'_, PetalsState>) -> Result<Vec<String>, String> {
+    let logs_guard = state.seeder_logs.lock().unwrap();
+    Ok(logs_guard.clone())
+}
+
 #[tauri::command]
 async fn mark_wsl_setup_complete(state: tauri::State<'_, PetalsState>) -> Result<(), String> {
     let mut setup_guard = state.wsl_setup_complete.lock().unwrap();
@@ -697,6 +751,7 @@ pub fn run() {
             stop_petals_seeder,
             is_petals_seeder_running,
             get_petals_seeder_info,
+            get_petals_seeder_logs,
         ])
         .setup(|app| {
             #[cfg(debug_assertions)]

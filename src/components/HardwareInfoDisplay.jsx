@@ -41,23 +41,9 @@ function HardwareInfoDisplay() {
   }
 
   return (
-    <div style={{
-      padding: '0.75rem',
-      backgroundColor: '#f7f7f7',
-      borderTop: '1px solid #e0e0e0',
-      fontSize: '0.8em',
-      marginTop: 'auto',
-    }}>
+    <div className="hardware-info-display">
       <div 
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          cursor: 'pointer',
-          marginBottom: expanded ? '0.5rem' : '0',
-          fontWeight: '600',
-          color: '#333',
-        }}
+        className={`hardware-info-header ${expanded ? 'expanded' : ''}`}
         onClick={() => setExpanded(!expanded)}
       >
         <span>Hardware Config</span>
@@ -65,48 +51,41 @@ function HardwareInfoDisplay() {
       </div>
 
       {expanded && (
-        <div style={{ 
-          display: 'flex', 
-          flexDirection: 'column', 
-          gap: '0.5rem',
-          color: '#555',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
-            <Cpu size={14} style={{ marginTop: '2px', flexShrink: 0 }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: '500' }}>CPU</div>
-              <div style={{ fontSize: '0.9em', wordBreak: 'break-word' }}>
+        <div className="hardware-info-content">
+          <div className="hardware-info-item">
+            <Cpu size={14} />
+            <div className="hardware-info-details">
+              <div className="hardware-info-label">CPU</div>
+              <div className="hardware-info-value">
                 {hardwareInfo.cpu_name}
               </div>
-              <div style={{ fontSize: '0.85em', color: '#888' }}>
+              <div className="hardware-info-value" style={{ fontSize: '0.8em' }}>
                 {hardwareInfo.cpu_cores} cores @ {hardwareInfo.cpu_frequency} MHz
               </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
-            <HardDrive size={14} style={{ marginTop: '2px', flexShrink: 0 }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: '500' }}>Memory</div>
-              <div style={{ fontSize: '0.9em' }}>
+          <div className="hardware-info-item">
+            <HardDrive size={14} />
+            <div className="hardware-info-details">
+              <div className="hardware-info-label">Memory</div>
+              <div className="hardware-info-value">
                 RAM: {hardwareInfo.total_memory} GB
               </div>
               {hardwareInfo.total_swap > 0 && (
-                <div style={{ fontSize: '0.85em', color: '#888' }}>
+                <div className="hardware-info-value" style={{ fontSize: '0.8em' }}>
                   Swap: {hardwareInfo.total_swap} GB
                 </div>
               )}
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'start', gap: '8px' }}>
-            <Monitor size={14} style={{ marginTop: '2px', flexShrink: 0 }} />
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: '500' }}>GPU</div>
+          <div className="hardware-info-item">
+            <Monitor size={14} />
+            <div className="hardware-info-details">
+              <div className="hardware-info-label">GPU</div>
               {hardwareInfo.gpu_info.map((gpu, index) => (
-                <div key={index} style={{ 
-                  fontSize: '0.85em', 
-                  wordBreak: 'break-word',
+                <div key={index} className="hardware-info-value" style={{ 
                   marginTop: index > 0 ? '4px' : '0',
                 }}>
                   {gpu}
@@ -115,13 +94,7 @@ function HardwareInfoDisplay() {
             </div>
           </div>
 
-          <div style={{ 
-            fontSize: '0.85em', 
-            color: '#888',
-            marginTop: '0.25rem',
-            paddingTop: '0.5rem',
-            borderTop: '1px solid #e0e0e0',
-          }}>
+          <div className="hardware-info-meta">
             {hardwareInfo.os_name} {hardwareInfo.os_version}
           </div>
         </div>

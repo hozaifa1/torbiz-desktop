@@ -4,9 +4,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { useEffect } from 'react';
+import { Loader } from 'lucide-react';
 import HomePage from './pages/HomePage';
 import AuthPage from './pages/AuthPage';
 import ChatPage from './pages/ChatPage';
+import NetworkPage from './pages/NetworkPage';
+import ProfilePage from './pages/ProfilePage';
+import SettingsPage from './pages/SettingsPage';
+import NotFoundPage from './pages/NotFoundPage';
 import { collectAndSendHardwareInfo } from './utils/hardwareService';
 
 const queryClient = new QueryClient();
@@ -49,16 +54,10 @@ function AppRoutes() {
 
   if (loading) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        flexDirection: 'column',
-        gap: '1rem'
-      }}>
+      <div className="loading-container">
+        <div className="spinner spinner-lg text-primary"></div>
         <h2>Loading Application...</h2>
-        <p style={{ color: '#666' }}>Validating session...</p>
+        <p className="text-muted">Validating session...</p>
       </div>
     );
   }
@@ -80,8 +79,23 @@ function AppRoutes() {
         path="/chat"
         element={user ? <ChatPage /> : <Navigate to="/auth" state={{ from: location }} replace />}
       />
-      {/* Fallback redirect */}
-      <Route path="*" element={<Navigate to={user ? "/chat" : "/auth"} replace />} />
+      {/* Network page protected */}
+      <Route
+        path="/network"
+        element={user ? <NetworkPage /> : <Navigate to="/auth" state={{ from: location }} replace />}
+      />
+      {/* Profile page protected */}
+      <Route
+        path="/profile"
+        element={user ? <ProfilePage /> : <Navigate to="/auth" state={{ from: location }} replace />}
+      />
+      {/* Settings page protected */}
+      <Route
+        path="/settings"
+        element={user ? <SettingsPage /> : <Navigate to="/auth" state={{ from: location }} replace />}
+      />
+      {/* 404 Not Found - Must be last */}
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 }
@@ -90,21 +104,12 @@ function AppRoutes() {
 function App() {
   if (!googleClientId) {
     return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        height: '100vh',
-        flexDirection: 'column',
-        gap: '1rem',
-        padding: '2rem',
-        textAlign: 'center'
-      }}>
+      <div className="loading-container">
         <h2>Configuration Error</h2>
-        <p style={{ color: '#d93025' }}>
+        <p className="text-error">
           Google Client ID is missing. Please check your .env file.
         </p>
-        <p style={{ fontSize: '0.9em', color: '#666' }}>
+        <p className="text-muted" style={{ fontSize: '0.9em' }}>
           Make sure VITE_GOOGLE_CLIENT_ID is set in your .env file.
         </p>
       </div>

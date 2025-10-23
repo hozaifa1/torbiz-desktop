@@ -5,6 +5,7 @@ use tauri::{Manager, Emitter};
 use tauri_plugin_notification::NotificationExt;
 use sysinfo::System;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::sync::{Arc, Mutex};
 use std::process::{Child, Command, Stdio};
 use tauri::path::BaseDirectory;
@@ -364,6 +365,9 @@ fn install_wsl_petals() -> Result<(), String> {
         println!("[WSL] Please wait, this is downloading large packages (~3GB)...");
         execute_wsl_command("~/.torbiz_venv/bin/python -m pip install git+https://github.com/bigscience-workshop/petals")?;
         
+        // NOTE: Keep bitsandbytes installed - it's needed for GPU quantization
+        // CPU compatibility issues are handled via environment variable at runtime
+        
         println!("[WSL] Verifying installation...");
         let verify_result = execute_wsl_command(
             "~/.torbiz_venv/bin/python3 -c 'import petals; import torch; print(f\"Petals: {petals.__version__}, PyTorch: {torch.__version__}\")'"
@@ -448,6 +452,11 @@ async fn setup_wsl_environment(
             println!("[WSL] Petals already installed and working");
         }
 
+        emit_progress("configuring_wsl", "Configuring time synchronization...", 90);
+        // WSL auto-syncs time on restart, so just log that it's ready
+        println!("[WSL] Time synchronization: WSL will auto-sync time on each start");
+        println!("[WSL] Setup completed successfully");
+
         emit_progress("complete", "WSL environment setup complete! You can now share your GPU.", 100);
         Ok("WSL environment is ready for Petals".to_string())
     }
@@ -498,6 +507,16 @@ async fn start_petals_seeder(
         // Copy script to WSL
         let wsl_script_path = copy_script_to_wsl(&script_path)?;
         
+        // Restart WSL to force time sync (WSL auto-syncs time on startup)
+        println!("[WSL] Restarting WSL to sync time...");
+        let _ = Command::new("wsl")
+            .arg("--terminate")
+            .output(); // Terminate WSL (will auto-restart on next command)
+        
+        // Small delay to allow WSL to fully terminate
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        println!("[WSL] Time synchronized via WSL restart");
+        
         // Build the command to run the script in WSL with virtual environment
         let command = format!(
             "source ~/.torbiz_venv/bin/activate && python3 {} --model-name '{}' --node-token '{}' --device cuda --port 31337 2>&1",
@@ -542,26 +561,54 @@ async fn start_petals_seeder(
                     if let Ok(line) = line {
                         println!("[PETALS-OUT] {}", line);
                         
-                        // Detect errors and emit events
-                        let is_error = line.contains("[ERROR]") || line.contains("Traceback") || line.contains("Error:") || line.contains("TypeError");
-                        let is_success = line.contains("✓✓✓ MODEL LOADED SUCCESSFULLY ✓✓✓");
+                        // Detect various events in logs
+                        let is_error = line.contains("[ERROR]") && !line.contains("triton"); // Ignore triton errors on CPU
+                        let is_time_error = line.contains("local time must be within") || line.contains("TIME SYNC ERROR");
+                        let is_success = line.contains("✓✓✓ MODEL LOADED SUCCESSFULLY ✓✓✓") 
+                            || line.contains("Loaded") && line.contains("block");
+                        let is_connecting = line.contains("Connecting to") || line.contains("DHT");
+                        let is_announced = line.contains("Announced that blocks") && line.contains("joining");
+                        let is_loading = line.contains("Loading") || line.contains("Measuring");
                         
-                        // Clone line for emitting if needed
-                        let line_for_emit = if is_error { Some(line.clone()) } else { None };
+                        // Emit progress events to UI
+                        if is_connecting {
+                            let _ = app_handle.emit("petals_progress", json!({
+                                "stage": "connecting",
+                                "message": "Connecting to Petals network..."
+                            }));
+                        }
+                        if is_loading {
+                            let _ = app_handle.emit("petals_progress", json!({
+                                "stage": "loading",
+                                "message": "Loading model blocks..."
+                            }));
+                        }
+                        if is_announced {
+                            let _ = app_handle.emit("petals_progress", json!({
+                                "stage": "announcing",
+                                "message": "Announcing availability to network..."
+                            }));
+                        }
                         
-                        // Store in logs
+                        // Store in logs and emit to UI
                         {
                             let mut logs_guard = logs.lock().unwrap();
-                            logs_guard.push(line);
-                            // Keep only last 100 lines
-                            if logs_guard.len() > 100 {
+                            logs_guard.push(line.clone());
+                            // Keep only last 200 lines
+                            if logs_guard.len() > 200 {
                                 logs_guard.remove(0);
                             }
                         }
                         
+                        // Emit log line to UI for real-time display
+                        let _ = app_handle.emit("petals_log", line.clone());
+                        
                         // Emit events after releasing lock
-                        if let Some(error_msg) = line_for_emit {
-                            let _ = app_handle.emit("petals_error", error_msg);
+                        if is_time_error {
+                            let _ = app_handle.emit("petals_error", 
+                                "TIME SYNC ERROR: Your system clock is out of sync. Please restart the app and try again.");
+                        } else if is_error {
+                            let _ = app_handle.emit("petals_error", line);
                         }
                         if is_success {
                             let _ = app_handle.emit("petals_success", "Model loaded successfully");

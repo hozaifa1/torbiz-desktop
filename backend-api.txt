@@ -1,0 +1,384 @@
+## 🧭 API Documentation — Torbiz Backend API (v1)
+
+### Base URL
+
+```
+https://torbiz-backend.vercel.app/
+```
+
+### Authentication
+
+All endpoints require **Basic Authentication** unless explicitly stated.
+Include your credentials in the request header:
+
+```
+Authorization: Basic <base64(username:password)>
+```
+
+---
+
+# 1. Client Endpoints
+
+## 1.1 Google Authentication
+
+**POST** `/client/google-auth/`
+
+Authenticate or register a client using Google OAuth.
+
+**Auth:** Basic
+**Response:** `201 Created`
+
+---
+
+## 1.2 List Clients
+
+**GET** `/client/list/`
+
+Retrieve all registered clients.
+
+**Auth:** Basic
+**Response:** `200 OK`
+
+**Response Example:**
+
+```json
+[
+  {
+    "user": {
+      "id": 1,
+      "username": "johndoe",
+      "email": "john@example.com"
+    },
+    "phone_no": "0123456789",
+    "user_token": "abc123xyz",
+    "ip": "192.168.0.1",
+    "terms_accepted": true,
+    "role": "user",
+    "profile_image_url": "http://example.com/image.jpg",
+    "is_gpu_provider_approved": true,
+    "provider_registration_date": "2024-05-15T10:20:30Z"
+  }
+]
+```
+
+---
+
+## 1.3 Create Client
+
+**POST** `/client/list/`
+
+Register a new client.
+
+**Auth:** Basic
+**Request Body:**
+
+```json
+{
+  "user": {
+    "username": "string",
+    "email": "user@example.com"
+  },
+  "phone_no": "string",
+  "user_image": 32767,
+  "terms_accepted": true
+}
+```
+
+**Response:** `201 Created`
+
+**Response Example:**
+
+```json
+{
+  "user": {
+    "id": 1,
+    "username": "string",
+    "email": "user@example.com"
+  },
+  "user_token": "token123",
+  "role": "user",
+  "is_gpu_provider_approved": false
+}
+```
+
+---
+
+## 1.4 Retrieve Single Client
+
+**GET** `/client/list/{id}/`
+
+Fetch a specific client by ID.
+
+**Path Parameter:**
+
+| Name | Type    | Required | Description |
+| ---- | ------- | -------- | ----------- |
+| id   | integer | ✅        | Client ID   |
+
+**Response:** `200 OK`
+
+---
+
+## 1.5 Update Client
+
+**PUT** `/client/list/{id}/`
+
+Update a client’s full details.
+
+**Request Body:**
+
+```json
+{
+  "user": {
+    "username": "string",
+    "email": "user@example.com"
+  },
+  "phone_no": "string",
+  "user_image": 32767,
+  "terms_accepted": true
+}
+```
+
+**Response:** `200 OK`
+
+---
+
+## 1.6 Partial Update Client
+
+**PATCH** `/client/list/{id}/`
+
+Update specific fields of a client record.
+
+---
+
+## 1.7 Delete Client
+
+**DELETE** `/client/list/{id}/`
+
+Delete a client by ID.
+
+**Response:** `204 No Content`
+
+---
+
+## 1.8 Authentication Endpoints
+
+| Action                   | Method | Endpoint                                   |
+| :----------------------- | :----- | :----------------------------------------- |
+| Login                    | POST   | `/client/login/`                           |
+| Logout                   | POST   | `/client/logout/`                          |
+| Password Reset (Request) | POST   | `/client/password-reset/`                  |
+| Register                 | POST   | `/client/register/`                        |
+| Reset Password (Confirm) | POST   | `/client/reset-password/{uidb64}/{token}/` |
+
+---
+
+# 2. GPU Endpoints
+
+## 2.1 List GPUs
+
+**GET** `/gpu/list/`
+
+Returns a list of registered GPU nodes.
+
+**Response Example:**
+
+```json
+[
+  {
+    "id": 1,
+    "gpu_info": "NVIDIA RTX 4090",
+    "cpu_name": "AMD Ryzen 9 5950X",
+    "cpu_core": "16",
+    "cpu_frequency": "3.4GHz",
+    "total_memory": "64GB",
+    "ram": "64GB",
+    "os_name": "Windows",
+    "os_version": "11",
+    "user": 1
+  }
+]
+```
+
+---
+
+## 2.2 Register GPU
+
+**POST** `/gpu/list/`
+
+Registers hardware details for a GPU provider.
+
+**Request Body:**
+
+```json
+{
+  "gpu_info": "NVIDIA RTX 4090",
+  "cpu_name": "AMD Ryzen 9 5950X",
+  "cpu_core": "16",
+  "cpu_frequency": "3.4GHz",
+  "total_memory": "64GB",
+  "total_swap": "32GB",
+  "ram": "64GB",
+  "os_name": "Windows",
+  "os_version": "11",
+  "user": 1
+}
+```
+
+**Response:** `201 Created`
+
+---
+
+## 2.3 Retrieve GPU by ID
+
+**GET** `/gpu/list/{id}/`
+
+---
+
+## 2.4 Update GPU
+
+**PUT** `/gpu/list/{id}/`
+**PATCH** `/gpu/list/{id}/`
+**DELETE** `/gpu/list/{id}/`
+
+Perform full update, partial update, or deletion of GPU record.
+
+---
+
+# 3. Inference Endpoints
+
+## 3.1 List All Inferences
+
+**GET** `/inference/`
+
+Retrieve all inference requests made by clients.
+
+**Response Example:**
+
+```json
+[
+  {
+    "id": 10,
+    "client": 1,
+    "client_username": "user123",
+    "question_text": "What is quantum computing?",
+    "answer_text": "Quantum computing uses qubits...",
+    "desired_model": "gpt-4",
+    "created_at": "2024-06-01T12:00:00Z"
+  }
+]
+```
+
+---
+
+## 3.2 Create Inference
+
+**POST** `/inference/`
+
+Create a new inference request.
+
+**Request Body:**
+
+```json
+{
+  "client": 1,
+  "question_text": "Explain gradient descent.",
+  "desired_model": "mistral-7b"
+}
+```
+
+**Response:** `201 Created`
+
+---
+
+## 3.3 Stream Inference
+
+**POST** `/inference/stream/`
+
+Create an inference request with streamed responses (useful for LLM output).
+
+---
+
+## 3.4 Retrieve, Update, or Delete Inference
+
+| Action         | Method | Endpoint           |
+| :------------- | :----- | :----------------- |
+| Retrieve       | GET    | `/inference/{id}/` |
+| Update         | PUT    | `/inference/{id}/` |
+| Partial Update | PATCH  | `/inference/{id}/` |
+| Delete         | DELETE | `/inference/{id}/` |
+
+---
+
+# 4. LLM Model Endpoints
+
+## 4.1 Get All Available Models
+
+**GET** `/llm_models/all-models/`
+
+Lists all available large language models in the network.
+
+**Response Example:**
+
+```json
+[
+  "mistral-7b",
+  "llama3-70b",
+  "phi-3-mini",
+  "stablelm-3b"
+]
+```
+
+---
+
+## 4.2 Register Node
+
+**POST** `/llm_models/register/`
+
+Registers a new GPU node into the Petals/LLM network.
+
+**Response:** `201 Created`
+
+---
+
+## 4.3 Heartbeat
+
+**POST** `/llm_models/heartbeat/`
+
+Sends a periodic signal to indicate that a node is active and healthy.
+
+**Response:** `201 Created`
+
+---
+
+## 4.4 Deregister Node
+
+**DELETE** `/llm_models/deregister/`
+
+De-register a GPU node by deleting it from the network.
+
+**Response:** `204 No Content`
+
+---
+
+# 5. Error Responses
+
+| Code | Meaning      | Description                                           |
+| :--- | :----------- | :---------------------------------------------------- |
+| 200  | OK           | Successful request                                    |
+| 201  | Created      | New resource successfully created                     |
+| 204  | No Content   | Successfully deleted or updated with no response body |
+| 400  | Bad Request  | Invalid parameters or malformed input                 |
+| 401  | Unauthorized | Authentication failed                                 |
+| 404  | Not Found    | Resource does not exist                               |
+| 500  | Server Error | Unexpected backend error                              |
+
+---
+
+# 6. Notes
+
+* All timestamps are in **ISO 8601 UTC format**.
+* Each client is linked to one or more GPUs and inferences.
+* LLM endpoints are primarily for **node registration and health tracking**.
+* GPU endpoints are for **hardware registration and provider verification**.
+* Client endpoints manage **authentication and profiles**.

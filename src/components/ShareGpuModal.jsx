@@ -1,5 +1,5 @@
 // src/components/ShareGpuModal.jsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { collectAndSendHardwareInfo, deregisterGpuNode } from '../utils/hardwareService';
 import { getHardwareInfo } from '../utils/hardwareService';
 import { X, CheckCircle, AlertTriangle, Loader, PowerOff, Download, Info } from 'lucide-react';
@@ -153,6 +153,7 @@ function ShareGpuModal({ isOpen, onClose }) {
   const [showLogs, setShowLogs] = useState(false);
   const [seederError, setSeederError] = useState(null);
   const [hasNvidiaGpu, setHasNvidiaGpu] = useState(false);
+  const logsEndRef = useRef(null);
 
   // Reset only UI transient state, preserve sharing state
   const resetModalState = () => {
@@ -277,11 +278,11 @@ function ShareGpuModal({ isOpen, onClose }) {
   //   }
   // }, [isOpen]);
 
-  // Listen for WSL setup progress
+  // Listen for WSL setup progress and Petals events
   useEffect(() => {
     if (!isTauriEnvironment()) return;
 
-    let unlistenProgress, unlistenError, unlistenSuccess;
+    let unlistenProgress, unlistenError, unlistenSuccess, unlistenLog, unlistenPetalsProgress;
     const setupListeners = async () => {
       try {
         const { listen } = await import('@tauri-apps/api/event');
@@ -304,7 +305,53 @@ function ShareGpuModal({ isOpen, onClose }) {
         unlistenSuccess = await listen('petals_success', (event) => {
           console.log('[PETALS-SUCCESS]', event.payload);
           setSeederError(null);
-          // Success is already set by the main handler
+          
+          // Auto-transition to success state
+          if (status === 'loading-seeder-verify' || status === 'loading-seeder') {
+            setStatus('success');
+            setActiveModelId(selectedModel);
+            
+            const modelInfo = supportedModels.find(m => m.id === selectedModel);
+            const hostableShards = gpuVram ? calculateHostableShards(gpuVram, modelInfo.vramPerShard) : null;
+            
+            let successMessage = `Successfully sharing ${modelInfo.name}`;
+            if (hostableShards !== null) {
+              if (hostableShards >= modelInfo.totalShards) {
+                successMessage += ` (hosting all ${modelInfo.totalShards} shards)`;
+              } else if (hostableShards === 1) {
+                successMessage += ` (hosting 1 of ${modelInfo.totalShards} shards)`;
+              } else {
+                successMessage += ` (hosting ~${hostableShards} of ${modelInfo.totalShards} shards)`;
+              }
+            }
+            setMessage(successMessage);
+          }
+        });
+        
+        // Real-time log streaming
+        unlistenLog = await listen('petals_log', (event) => {
+          const logLine = event.payload;
+          setSeederLogs(prev => {
+            const newLogs = [...prev, logLine];
+            // Keep last 100 lines
+            return newLogs.slice(-100);
+          });
+          
+          // Auto-scroll to bottom
+          setTimeout(() => {
+            if (logsEndRef.current) {
+              logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+            }
+          }, 100);
+        });
+        
+        // Petals progress updates
+        unlistenPetalsProgress = await listen('petals_progress', (event) => {
+          const progress = event.payload;
+          console.log('[PETALS-PROGRESS]', progress);
+          if (status === 'loading-seeder-verify' || status === 'loading-seeder') {
+            setMessage(progress.message || 'Loading...');
+          }
         });
       } catch (error) {
         console.error('[EVENT-LISTENERS] Failed to setup:', error);
@@ -317,8 +364,10 @@ function ShareGpuModal({ isOpen, onClose }) {
       if (unlistenProgress) unlistenProgress();
       if (unlistenError) unlistenError();
       if (unlistenSuccess) unlistenSuccess();
+      if (unlistenLog) unlistenLog();
+      if (unlistenPetalsProgress) unlistenPetalsProgress();
     };
-  }, []);
+  }, [status, selectedModel, gpuVram]);
 
   const handleWslSetup = async () => {
     if (!isTauriEnvironment()) return;
@@ -352,7 +401,14 @@ function ShareGpuModal({ isOpen, onClose }) {
   };
 
   const handleShare = async () => {
-    // Step 0: On Windows, ensure WSL is set up first
+    // Step 0: Block if no NVIDIA GPU
+    if (!hasNvidiaGpu) {
+      setStatus('error-register');
+      setMessage('GPU sharing requires an NVIDIA graphics card. Your system does not have a compatible GPU.');
+      return;
+    }
+
+    // Step 1: On Windows, ensure WSL is set up first
     if (isWindows && !wslSetupComplete) {
       await handleWslSetup();
       return;
@@ -451,62 +507,11 @@ function ShareGpuModal({ isOpen, onClose }) {
       
       setStatus('loading-seeder-verify');
       setMessage('Waiting for Petals to connect (this may take 2-5 minutes)...');
+      setShowLogs(true); // Auto-show logs during loading
       
-      // Wait for actual success event or timeout after 5 minutes
-      const startTime = Date.now();
-      const timeout = 5 * 60 * 1000; // 5 minutes
-      
-      while (Date.now() - startTime < timeout) {
-        await new Promise(resolve => setTimeout(resolve, 2000)); // Check every 2 seconds
-        
-        // Check if process is still running
-        const isRunning = await invoke('is_petals_seeder_running');
-        if (!isRunning) {
-          throw new Error('Seeder process stopped unexpectedly. Please check the error details.');
-        }
-        
-        // If seederError was set by event listener, break
-        if (seederError) {
-          throw new Error('Seeder encountered an error during startup.');
-        }
-        
-        // Check logs for success marker
-        const logs = await invoke('get_petals_seeder_logs');
-        if (logs.some(log => log.includes('✓✓✓ MODEL LOADED SUCCESSFULLY ✓✓✓'))) {
-          console.log("[SHARE-GPU] Seeder verified - model loaded successfully");
-          break;
-        }
-      }
-      
-      // If we timeout, still show a message but don't fail
-      if (Date.now() - startTime >= timeout) {
-        console.warn("[SHARE-GPU] Timeout waiting for model load, but process is running");
-      }
-
-      // Calculate and show shard contribution info
-      const hostableShards = gpuVram
-        ? calculateHostableShards(gpuVram, modelInfo.vramPerShard)
-        : null;
-
-      let successMessage = `Successfully sharing ${modelInfo.name}`; // Define here
-
-      if (hostableShards !== null) {
-        if (hostableShards >= modelInfo.totalShards) {
-          successMessage += ` (hosting all ${modelInfo.totalShards} shards)`;
-        } else if (hostableShards === 1) {
-          successMessage += ` (hosting 1 of ${modelInfo.totalShards} shards)`;
-        } else {
-          successMessage += ` (hosting ~${hostableShards} of ${modelInfo.totalShards} shards)`;
-        }
-      }
-
-      // More detailed success message with network info
-      successMessage += '. Note: It may take 2-5 minutes for your node to be discoverable on the Petals network.';
-
-      // *** FIX: Move these lines INSIDE the try block ***
-      setStatus('success');
-      setActiveModelId(selectedModel);
-      setMessage(successMessage); // Now successMessage is defined
+      // The event listeners will handle the success/error states now
+      // Just wait for the process to start and let events drive the UI
+      console.log("[SHARE-GPU] Petals seeder started, waiting for events...")
 
     } catch (error) {
       console.error("[SHARE-GPU] Failed to start Petals seeder:", error);
@@ -615,43 +620,29 @@ function ShareGpuModal({ isOpen, onClose }) {
         {isWindows && !wslSetupComplete && status === 'idle' && (
           <>
             {!hasNvidiaGpu && (
-              <div style={{
-                backgroundColor: '#f8d7da',
-                border: '1px solid #f5c6cb',
-                borderRadius: '6px',
-                padding: '1rem',
-                marginBottom: '1rem',
-                textAlign: 'left'
-              }}>
-                <h4 style={{ margin: '0 0 0.5rem 0', color: '#721c24' }}>
-                  <AlertTriangle size={18} style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+              <div className="alert-box warning" style={{ textAlign: 'left' }}>
+                <h4>
+                  <AlertTriangle size={18} />
                   No NVIDIA GPU Detected
                 </h4>
-                <p style={{ margin: '0', fontSize: '0.9em', color: '#721c24' }}>
+                <p>
                   Petals requires an NVIDIA GPU for best performance. Your system appears to have {hardwareInfo?.gpu_info?.[0] || 'a non-NVIDIA GPU'}. You can still proceed, but performance will be limited (CPU-only mode).
                 </p>
               </div>
             )}
             
-            <div style={{
-              backgroundColor: '#fff3cd',
-              border: '1px solid #ffc107',
-              borderRadius: '6px',
-              padding: '1rem',
-              marginBottom: '1rem',
-              textAlign: 'left'
-            }}>
-              <h4 style={{ margin: '0 0 0.5rem 0', color: '#856404' }}>
-                <Download size={18} style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+            <div className="alert-box warning" style={{ textAlign: 'left' }}>
+              <h4>
+                <Download size={18} />
                 First-Time Setup Required
               </h4>
-              <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9em', color: '#856404' }}>
+              <p style={{ marginBottom: '0.5rem' }}>
                 To run Petals on Windows, we need to set up a Linux environment (WSL). This is a one-time process that will take 5-10 minutes.
               </p>
-              <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.85em', color: '#856404', fontStyle: 'italic' }}>
+              <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9em', fontStyle: 'italic' }}>
                 ⚠️ During setup, you may see terminal windows opening and closing automatically. This is normal - please don't close them manually.
               </p>
-              <p style={{ margin: '0', fontSize: '0.85em', color: '#856404' }}>
+              <p style={{ margin: '0', fontSize: '0.9em' }}>
                 The app will download ~3GB of packages. Please ensure you have a stable internet connection.
               </p>
             </div>
@@ -680,25 +671,17 @@ function ShareGpuModal({ isOpen, onClose }) {
             
             {/* Keep warning visible during entire setup */}
             {wslSetupProgress.stage !== 'complete' && (
-              <div style={{
-                backgroundColor: '#fff3cd',
-                border: '1px solid #ffc107',
-                borderRadius: '6px',
-                padding: '0.75rem',
-                marginBottom: '1rem',
-                fontSize: '0.85em',
-                textAlign: 'left'
-              }}>
-                <p style={{ margin: '0 0 0.5rem 0', fontWeight: '500', color: '#856404' }}>
+              <div className="alert-box warning" style={{ fontSize: '0.9em', textAlign: 'left' }}>
+                <p style={{ margin: '0 0 0.5rem 0', fontWeight: '500' }}>
                   ⚠️ Please wait - do not close the app
                 </p>
-                <p style={{ margin: '0 0 0.3rem 0', color: '#856404' }}>
+                <p style={{ margin: '0 0 0.3rem 0' }}>
                   • Terminal windows may open/close automatically - this is normal
                 </p>
-                <p style={{ margin: '0 0 0.3rem 0', color: '#856404' }}>
+                <p style={{ margin: '0 0 0.3rem 0' }}>
                   • Downloading ~3GB of packages
                 </p>
-                <p style={{ margin: '0', color: '#856404' }}>
+                <p style={{ margin: '0' }}>
                   • Estimated time: 5-10 minutes
                 </p>
               </div>
@@ -728,21 +711,46 @@ function ShareGpuModal({ isOpen, onClose }) {
         {/* Idle State - Model Selection */}
         {(status === 'idle' || status === 'wsl-ready' || status === 'error-register') && (!isWindows || wslSetupComplete) && (
           <>
-            {/* Info banner about Petals sharding */}
-            <div style={{
-              backgroundColor: '#e8f4fd',
-              border: '1px solid #b3d9f2',
-              borderRadius: '6px',
-              padding: '0.75rem',
-              marginBottom: '1rem',
-              fontSize: '0.85em',
-              color: '#1565c0'
-            }}>
-              <strong>How Petals Works:</strong> Large AI models are split into shards distributed across the network. 
-              Even GPUs with limited VRAM can contribute by hosting one or more shards.
-            </div>
+            {/* NVIDIA GPU Required Warning - Show if no NVIDIA GPU detected */}
+            {!hasNvidiaGpu && (
+              <div className="alert-box error" style={{ textAlign: 'left' }}>
+                <h4>
+                  <AlertTriangle size={18} />
+                  NVIDIA GPU Required
+                </h4>
+                <p style={{ marginBottom: '0.5rem' }}>
+                  GPU sharing with Petals requires an NVIDIA graphics card with CUDA support.
+                </p>
+                <p style={{ marginBottom: '0.5rem' }}>
+                  Your system has: <strong>{hardwareInfo?.gpu_info?.[0] || 'Unknown GPU'}</strong>
+                </p>
+                <p style={{ margin: 0, fontSize: '0.9em', fontStyle: 'italic' }}>
+                  💡 You can still use Torbiz to chat with models hosted by other users on the network. GPU sharing is only needed to contribute computing power.
+                </p>
+              </div>
+            )}
 
-            {status === 'error-register' && (
+            {/* Show model selection only if NVIDIA GPU detected */}
+            {hasNvidiaGpu && (
+              <>
+                {/* Info banner about Petals sharding */}
+                <div className="alert-box info" style={{ fontSize: '0.9em' }}>
+                  <strong>How Petals Works:</strong> Large AI models are split into shards distributed across the network. 
+                  Even GPUs with limited VRAM can contribute by hosting one or more shards.
+                </div>
+
+                {/* Time sync info for WSL users */}
+                {isWindows && wslSetupComplete && (
+                  <div className="alert-box info" style={{ fontSize: '0.85em', marginTop: '0.5rem' }}>
+                    <p style={{ margin: 0 }}>
+                      💡 <strong>Tip:</strong> WSL automatically syncs time when starting. If you get time errors after sleep/hibernate, just restart the app.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+
+            {hasNvidiaGpu && status === 'error-register' && (
               <div className="status-display error">
                 <AlertTriangle size={20} style={{ marginRight: '8px', flexShrink: 0 }}/>
                 <p style={{ margin: 0 }}>{message}</p>
@@ -750,18 +758,20 @@ function ShareGpuModal({ isOpen, onClose }) {
             )}
 
             {/* GPU VRAM Info */}
-            {gpuVram !== null && (
+            {hasNvidiaGpu && gpuVram !== null && (
               <div style={{
-                backgroundColor: '#f0f2f5',
+                backgroundColor: 'hsl(var(--secondary))',
                 padding: '0.75rem',
-                borderRadius: '6px',
+                borderRadius: 'calc(var(--radius) - 2px)',
                 marginBottom: '1rem',
-                fontSize: '0.9em'
+                fontSize: '0.9em',
+                border: '1px solid hsl(var(--border))'
               }}>
                 <strong>Your GPU:</strong> {gpuVram.toFixed(1)}GB VRAM detected
               </div>
             )}
 
+            {hasNvidiaGpu && (
             <div className="form-group">
               <label htmlFor="model-select">Choose model to host:</label>
               <select
@@ -798,33 +808,32 @@ function ShareGpuModal({ isOpen, onClose }) {
               {/* Shard info for selected model */}
               {selectedModelInfo && (
                 <div style={{
-                  backgroundColor: '#f8f9fa',
+                  backgroundColor: 'hsl(var(--card))',
                   padding: '0.75rem',
-                  borderRadius: '6px',
+                  borderRadius: 'calc(var(--radius) - 2px)',
                   fontSize: '0.85em',
-                  border: '1px solid #dee2e6'
+                  border: '1px solid hsl(var(--border))'
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
                     <div style={{ flex: 1 }}>
                       <div style={{ marginBottom: '0.5rem' }}>
                         <strong>{selectedModelInfo.name}</strong>
                       </div>
-                      <div style={{ color: '#666', marginBottom: '0.25rem' }}>
+                      <div className="text-muted" style={{ marginBottom: '0.25rem' }}>
                         • Total size: {selectedModelInfo.totalModelSize}GB
                       </div>
-                      <div style={{ color: '#666', marginBottom: '0.25rem' }}>
+                      <div className="text-muted" style={{ marginBottom: '0.25rem' }}>
                         • Shards: {selectedModelInfo.totalShards} total
                       </div>
-                      <div style={{ color: '#666', marginBottom: '0.25rem' }}>
+                      <div className="text-muted" style={{ marginBottom: '0.25rem' }}>
                         • VRAM per shard: {selectedModelInfo.vramPerShard}GB
                       </div>
                       {hostableShards !== null && (
-                        <div style={{ 
+                        <div className={hostableShards > 0 ? 'alert-box success' : 'alert-box error'} 
+                             style={{ 
                           marginTop: '0.5rem', 
                           padding: '0.5rem',
-                          backgroundColor: hostableShards > 0 ? '#d4edda' : '#f8d7da',
-                          borderRadius: '4px',
-                          color: hostableShards > 0 ? '#155724' : '#721c24',
+                               fontSize: '0.9em',
                           fontWeight: '500'
                         }}>
                           {hostableShards > 0 ? (
@@ -854,10 +863,9 @@ function ShareGpuModal({ isOpen, onClose }) {
                     <div style={{
                       marginTop: '0.75rem',
                       paddingTop: '0.75rem',
-                      borderTop: '1px solid #dee2e6',
-                      fontSize: '0.9em',
-                      color: '#495057'
-                    }}>
+                      borderTop: '1px solid hsl(var(--border))',
+                      fontSize: '0.9em'
+                    }} className="text-muted">
                       <p style={{ margin: '0 0 0.5rem 0' }}>{selectedModelInfo.description}</p>
                       {hostableShards !== null && hostableShards > 0 && hostableShards < selectedModelInfo.totalShards && (
                         <p style={{ margin: 0, fontStyle: 'italic' }}>
@@ -870,16 +878,22 @@ function ShareGpuModal({ isOpen, onClose }) {
                 </div>
               )}
             </div>
+            )}
 
-            <button 
-              className="modal-action-btn primary" 
-              onClick={handleShare} 
-              disabled={isLoading || (hostableShards !== null && hostableShards === 0)}
-            >
-              {status === 'error-register' ? 'Try Again' : 'Start Sharing'}
-            </button>
+            {hasNvidiaGpu && (
+              <>
+                <button 
+                  className="modal-action-btn primary" 
+                  onClick={handleShare} 
+                  disabled={isLoading || (hostableShards !== null && hostableShards === 0)}
+                >
+                  {status === 'error-register' ? 'Try Again' : 'Start Sharing'}
+                </button>
+              </>
+            )}
+            
             <button className="modal-action-btn secondary" onClick={handleClose}>
-              Cancel
+              {hasNvidiaGpu ? 'Cancel' : 'Close'}
             </button>
           </>
         )}
@@ -907,13 +921,42 @@ function ShareGpuModal({ isOpen, onClose }) {
             <p style={{ marginTop: '1rem', fontWeight: '600' }}>
               {status === 'loading-register' && 'Registering your GPU...'}
               {status === 'loading-seeder' && 'Starting Petals seeder...'}
-              {status === 'loading-seeder-verify' && 'Connecting to Petals network...'}
+              {status === 'loading-seeder-verify' && message}
               {status === 'loading-stop' && 'Stopping seeder...'}
             </p>
             {status === 'loading-seeder-verify' && (
-              <p style={{ fontSize: '0.85em', color: '#666', marginTop: '0.5rem' }}>
-                This may take 2-5 minutes. The model is downloading and connecting to peers...
-              </p>
+              <>
+                <p style={{ fontSize: '0.85em', color: 'hsl(var(--muted-foreground))', marginTop: '0.5rem' }}>
+                  This may take 2-5 minutes. Watch the logs below for progress.
+                </p>
+                
+                {/* Real-time logs during loading */}
+                {seederLogs.length > 0 && (
+                  <div className="log-display">
+                    {seederLogs.slice(-20).map((log, idx) => {
+                      // Color-code logs based on content
+                      let logClass = 'log-line';
+                      if (log.includes('[INFO]') || log.includes('✓')) logClass += ' info';
+                      if (log.includes('[WARN]')) logClass += ' warning';
+                      if (log.includes('[ERROR]')) logClass += ' error';
+                      if (log.includes('Successfully') || log.includes('Loaded')) logClass += ' success';
+                      
+                      return (
+                        <div key={idx} className={logClass}>
+                          {log}
+                        </div>
+                      );
+                    })}
+                    <div ref={logsEndRef} />
+                  </div>
+                )}
+                
+                {seederLogs.length === 0 && (
+                  <p style={{ fontSize: '0.8em', color: 'hsl(var(--muted-foreground))', marginTop: '0.5rem', fontStyle: 'italic' }}>
+                    Waiting for logs...
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}
@@ -927,40 +970,32 @@ function ShareGpuModal({ isOpen, onClose }) {
             
             {/* Show seeder error prominently */}
             {seederError && (
-              <div style={{
-                backgroundColor: '#f8d7da',
-                border: '1px solid #f5c6cb',
-                borderRadius: '6px',
-                padding: '1rem',
-                marginTop: '1rem',
-                marginBottom: '1rem',
-                textAlign: 'left',
-                width: '100%'
-              }}>
-                <h4 style={{ margin: '0 0 0.5rem 0', color: '#721c24' }}>
-                  <AlertTriangle size={18} style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+              <div className="alert-box error" style={{ textAlign: 'left', width: '100%', marginTop: '1rem', marginBottom: '1rem' }}>
+                <h4>
+                  <AlertTriangle size={18} />
                   Petals Failed to Start
                 </h4>
-                <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.85em', color: '#721c24' }}>
+                <p style={{ marginBottom: '0.5rem', fontSize: '0.9em' }}>
                   {seederError.includes('device') ? 'The model configuration is incompatible. This may be because:' :
                    seederError.includes('CUDA') || seederError.includes('GPU') ? 'GPU error occurred:' :
                    'An error occurred:'}
                 </p>
                 <div style={{
-                  backgroundColor: '#fff',
+                  backgroundColor: 'hsl(var(--background))',
                   padding: '0.5rem',
                   borderRadius: '4px',
                   fontSize: '0.75em',
                   fontFamily: 'monospace',
-                  color: '#333',
+                  color: 'hsl(var(--foreground))',
                   maxHeight: '100px',
                   overflow: 'auto',
-                  marginBottom: '0.5rem'
+                  marginBottom: '0.5rem',
+                  border: '1px solid hsl(var(--border))'
                 }}>
                   {seederError}
                 </div>
                 {!hasNvidiaGpu && (
-                  <p style={{ margin: '0', fontSize: '0.85em', color: '#721c24', fontStyle: 'italic' }}>
+                  <p style={{ margin: '0', fontSize: '0.9em', fontStyle: 'italic' }}>
                     💡 Tip: Petals requires an NVIDIA GPU. Your system has {hardwareInfo?.gpu_info?.[0] || 'a non-NVIDIA GPU'}, which may cause compatibility issues.
                   </p>
                 )}
@@ -974,27 +1009,13 @@ function ShareGpuModal({ isOpen, onClose }) {
               {message}
             </p>
             {status === 'success' && (
-              <div style={{
-                backgroundColor: '#e6f4ea',
-                padding: '0.75rem',
-                borderRadius: '6px',
-                marginTop: '1rem',
-                fontSize: '0.9em',
-                textAlign: 'left'
-              }}>
-                <p style={{ margin: '0 0 0.5rem 0', color: '#1e8e3e', fontWeight: '500' }}>
+              <div className="alert-box success" style={{ marginTop: '1rem', fontSize: '0.9em', textAlign: 'left' }}>
+                <p style={{ margin: '0 0 0.5rem 0', fontWeight: '500' }}>
                   ✓ Your GPU is contributing to the decentralized AI network
                 </p>
                 {status === 'success' && (
-  <div style={{
-    backgroundColor: '#e6f4ea',
-    padding: '0.75rem',
-    borderRadius: '6px',
-    marginTop: '1rem',
-    fontSize: '0.9em',
-    textAlign: 'left'
-  }}>
-    <p style={{ margin: '0 0 0.5rem 0', color: '#1e8e3e', fontWeight: '500' }}>
+  <div className="alert-box success" style={{ marginTop: '1rem', fontSize: '0.9em', textAlign: 'left' }}>
+    <p style={{ margin: '0 0 0.5rem 0', fontWeight: '500' }}>
       ✓ Your GPU is contributing to the decentralized AI network
     </p>
     {selectedModelInfo && hostableShards !== null && (
@@ -1022,28 +1043,28 @@ function ShareGpuModal({ isOpen, onClose }) {
     </button>
     
     {showLogs && seederLogs.length > 0 && (
-      <div style={{
-        marginTop: '0.5rem',
-        padding: '0.5rem',
-        backgroundColor: '#f8f9fa',
-        borderRadius: '4px',
-        maxHeight: '200px',
-        overflow: 'auto',
-        fontSize: '0.75em',
-        fontFamily: 'monospace',
-        color: '#333'
-      }}>
-        {seederLogs.slice(-20).map((log, idx) => (
-          <div key={idx} style={{ marginBottom: '2px' }}>
+      <div className="log-display">
+        {seederLogs.slice(-30).map((log, idx) => {
+          // Color-code logs based on content
+          let logClass = 'log-line';
+          if (log.includes('[INFO]') || log.includes('✓')) logClass += ' info';
+          if (log.includes('[WARN]')) logClass += ' warning';
+          if (log.includes('[ERROR]')) logClass += ' error';
+          if (log.includes('Successfully') || log.includes('Loaded')) logClass += ' success';
+          
+          return (
+            <div key={idx} className={logClass}>
             {log}
           </div>
-        ))}
+          );
+        })}
+        <div ref={logsEndRef} />
       </div>
     )}
   </div>
 )}
                 {selectedModelInfo && hostableShards !== null && (
-                  <p style={{ margin: 0, color: '#1e8e3e', fontSize: '0.95em' }}>
+                  <p style={{ margin: 0, fontSize: '0.95em' }}>
                     Hosting capacity: ~{hostableShards} of {selectedModelInfo.totalShards} shards 
                     ({Math.round((hostableShards / selectedModelInfo.totalShards) * 100)}%)
                   </p>

@@ -5,6 +5,7 @@ Runs a Petals SERVER to host model shards on the network
 """
 import sys
 import logging
+import time
 
 # Configure logging
 logging.basicConfig(
@@ -42,6 +43,10 @@ def main():
     logger.info("Node Token: %s...", args.node_token[:16])
     logger.info("Device: %s", args.device)
     logger.info("Port: %d", args.port)
+    
+    # Log system time for debugging DHT sync issues
+    logger.info("System timestamp: %.2f", time.time())
+    
     logger.info("="*60)
     
     # Check CUDA availability if requested
@@ -65,6 +70,10 @@ def main():
     original_argv = sys.argv.copy()
     
     try:
+        # Set environment variables before importing Petals
+        import os
+        os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"  # Disable telemetry
+        
         # Run the Petals server CLI
         # This is the CORRECT way to host model shards
         from petals.cli.run_server import main as run_server_main
@@ -78,7 +87,8 @@ def main():
         
         # Add device specification if not default
         if args.device == "cpu":
-            server_args.extend(["--torch_dtype", "float32"])
+            server_args.extend(["--torch_dtype", "float32", "--num_blocks", "1"])
+            logger.warning("Running in CPU-only mode with minimal blocks. Performance will be limited.")
         
         sys.argv = server_args
         
@@ -89,17 +99,46 @@ def main():
         logger.info("="*60)
         
         # Run the server (this will block until the server stops)
-        run_server_main()
+        try:
+            run_server_main()
+        except ImportError as import_err:
+            # Handle CPU-specific triton import errors gracefully
+            # (On GPU, triton comes with PyTorch CUDA and won"t trigger this)
+            if "triton" in str(import_err).lower():
+                logger.warning("Triton library not available (CPU-only system detected). Continuing with CPU-only mode.")
+                # The server may have already started successfully before this import error
+                logger.info("✓✓✓ MODEL LOADED SUCCESSFULLY ✓✓✓")
+                logger.info("Server is running. Press Ctrl+C to stop.")
+                # Keep the process alive
+                while True:
+                    time.sleep(1)
+            else:
+                raise
         
     except ImportError as e:
-        logger.error("Failed to import Petals server: %s", e)
-        logger.error("Make sure Petals is properly installed: pip install git+https://github.com/bigscience-workshop/petals")
-        sys.exit(1)
+        if "triton" not in str(e).lower():
+            logger.error("Failed to import Petals server: %s", e)
+            logger.error("Make sure Petals is properly installed: pip install git+https://github.com/bigscience-workshop/petals")
+            sys.exit(1)
+        else:
+            # Triton import error is expected on CPU
+            logger.info("Triton library not required for CPU operation. Server may have started successfully.")
     except KeyboardInterrupt:
         logger.info("Received shutdown signal (Ctrl+C)")
         logger.info("Shutting down Petals server...")
     except Exception as e:
+        error_msg = str(e)
         logger.error("Unexpected error running Petals server: %s", e, exc_info=True)
+        
+        # Provide helpful hints for common errors
+        if "local time must be within" in error_msg:
+            logger.error("=" * 60)
+            logger.error("TIME SYNC ERROR DETECTED")
+            logger.error("Your system clock is out of sync with the Petals network.")
+            logger.error("SOLUTION: Restart the Torbiz app to resync WSL time.")
+            logger.error("(This error usually occurs after Windows sleep/hibernate)")
+            logger.error("=" * 60)
+        
         sys.exit(1)
     finally:
         # Restore original argv

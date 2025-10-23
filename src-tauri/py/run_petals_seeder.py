@@ -35,6 +35,8 @@ def main():
                         help="Device to use (cuda, cpu)")
     parser.add_argument("--port", type=int, default=31337,
                         help="Port for P2P communication")
+    parser.add_argument("--hf-token", type=str,
+                        help="HuggingFace access token for gated models")
     args = parser.parse_args()
     
     logger.info("="*60)
@@ -74,11 +76,28 @@ def main():
         import os
         os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"  # Disable telemetry
         
-        # Configure bitsandbytes to use CUDA 12.3 binaries (compatible with CUDA 11.7-12.8)
-        # This fixes "libbitsandbytes_cuda128.so not found" errors on newer CUDA versions
-        # See: https://huggingface.co/docs/bitsandbytes/installation
-        os.environ["BNB_CUDA_VERSION"] = "123"  # Use CUDA 12.3 binaries (most compatible)
-        logger.info("bitsandbytes configured for CUDA 12.3 compatibility (works with CUDA 11.7+)")
+        # Set HuggingFace token if provided
+        if args.hf_token:
+            os.environ["HF_TOKEN"] = args.hf_token
+            os.environ["HUGGING_FACE_HUB_TOKEN"] = args.hf_token
+            logger.info("HuggingFace authentication configured")
+        
+        # Configure CUDA paths for bitsandbytes
+        cuda_paths = [
+            "/usr/local/cuda/lib64",
+            "/usr/lib/x86_64-linux-gnu",
+            "/usr/lib/wsl/lib"  # WSL-specific CUDA path
+        ]
+        
+        # Add CUDA paths to LD_LIBRARY_PATH
+        old_ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+        new_ld_path = ":".join([*cuda_paths, old_ld_path]) if old_ld_path else ":".join(cuda_paths)
+        os.environ["LD_LIBRARY_PATH"] = new_ld_path
+        
+        # Configure bitsandbytes for CUDA 12.x compatibility
+        os.environ["BNB_CUDA_VERSION"] = "121"  # Use CUDA 12.1 binaries
+        logger.info("CUDA paths configured: %s", new_ld_path)
+        logger.info("bitsandbytes configured for CUDA 12.1 compatibility")
         
         # Run the Petals server CLI
         # This is the CORRECT way to host model shards

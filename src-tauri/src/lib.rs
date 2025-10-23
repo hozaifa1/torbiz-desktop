@@ -468,6 +468,7 @@ async fn start_petals_seeder(
     node_token: String,
     state: tauri::State<'_, PetalsState>,
     app: tauri::AppHandle,
+    hf_token: Option<String>,
 ) -> Result<String, String> {
     // Check if already running
     {
@@ -515,12 +516,20 @@ async fn start_petals_seeder(
         println!("[WSL] Time synchronized via WSL restart");
         
         // Build the command to run the script in WSL with virtual environment
-        let command = format!(
-            "source ~/.torbiz_venv/bin/activate && python3 {} --model-name '{}' --node-token '{}' --device cuda --port 31337 2>&1",
+        let mut command = format!(
+            "source ~/.torbiz_venv/bin/activate && python3 {} --model-name '{}' --node-token '{}' --device cuda --port 31337",
             wsl_script_path,
             model_name,
             node_token
         );
+
+        // Add HF token if provided
+        if let Some(token) = hf_token {
+            command.push_str(&format!(" --hf-token '{}'", token));
+        }
+        
+        // Add error redirection
+        command.push_str(" 2>&1");
 
         println!("[PETALS] Running WSL command: {}", command);
 

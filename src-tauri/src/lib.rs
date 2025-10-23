@@ -361,6 +361,24 @@ fn install_wsl_petals() -> Result<(), String> {
         println!("[WSL] Upgrading pip...");
         execute_wsl_command("~/.torbiz_venv/bin/pip install --upgrade pip")?;
         
+        // Check if CUDA is available in WSL
+        println!("[WSL] Checking for CUDA installation...");
+        let cuda_check = execute_wsl_command("which nvcc 2>/dev/null || echo 'not_found'");
+        match cuda_check {
+            Ok(output) if output.trim() != "not_found" => {
+                println!("[WSL] CUDA compiler found: {}", output.trim());
+                // Try to get CUDA version
+                if let Ok(version) = execute_wsl_command("nvcc --version 2>/dev/null | grep 'release' || echo 'unknown'") {
+                    println!("[WSL] CUDA version info: {}", version.trim());
+                }
+            }
+            _ => {
+                println!("[WSL] WARNING: CUDA toolkit not found in WSL");
+                println!("[WSL] GPU acceleration may not work. Consider installing CUDA in WSL:");
+                println!("[WSL] See: https://docs.nvidia.com/cuda/wsl-user-guide/index.html");
+            }
+        }
+        
         println!("[WSL] Installing Petals from GitHub (this will take 5-10 minutes and install all dependencies including PyTorch)...");
         println!("[WSL] Please wait, this is downloading large packages (~3GB)...");
         execute_wsl_command("~/.torbiz_venv/bin/python -m pip install git+https://github.com/bigscience-workshop/petals")?;
@@ -373,6 +391,23 @@ fn install_wsl_petals() -> Result<(), String> {
         match verify_result {
             Ok(output) => println!("[WSL] Installation verified: {}", output.trim()),
             Err(e) => println!("[WSL] Warning: Could not verify installation: {}", e),
+        }
+        
+        // Verify CUDA availability in PyTorch
+        println!("[WSL] Checking PyTorch CUDA support...");
+        let pytorch_cuda_check = execute_wsl_command(
+            "~/.torbiz_venv/bin/python3 -c 'import torch; print(f\"CUDA available: {torch.cuda.is_available()}\")' 2>/dev/null || echo 'check_failed'"
+        );
+        match pytorch_cuda_check {
+            Ok(output) => {
+                println!("[WSL] PyTorch CUDA check: {}", output.trim());
+                if output.contains("True") {
+                    println!("[WSL] ✓ GPU acceleration is ready!");
+                } else {
+                    println!("[WSL] ⚠ GPU acceleration not available - will run in CPU mode");
+                }
+            }
+            Err(e) => println!("[WSL] Could not verify CUDA support: {}", e),
         }
         
         println!("[WSL] Petals installation completed");
@@ -491,14 +526,36 @@ async fn start_petals_seeder(
         println!("[PETALS] Starting Petals in WSL...");
         println!("[PETALS] Model: {}", model_name);
         
-        // Get the script path from resources
-        let script_path = app
-            .path()
-            .resolve("py/run_petals_seeder.py", BaseDirectory::Resource)
-            .map_err(|e| format!("Failed to resolve script path: {}", e))?;
+        // Get the script path - in dev mode, load from source; in release, load from resources
+        let script_path = if cfg!(debug_assertions) {
+            // DEV MODE: Load from source directory for hot reloading
+            let mut dev_path = std::env::current_dir()
+                .map_err(|e| format!("Failed to get current directory: {}", e))?;
+            dev_path.push("src-tauri");
+            dev_path.push("py");
+            dev_path.push("run_petals_seeder.py");
+            
+            println!("[PETALS-DEV] Using source script for hot reloading: {}", dev_path.display());
+            dev_path
+        } else {
+            // RELEASE MODE: Load from bundled resources
+            let release_path = app
+                .path()
+                .resolve("py/run_petals_seeder.py", BaseDirectory::Resource)
+                .map_err(|e| format!("Failed to resolve script path: {}", e))?;
+            
+            println!("[PETALS-RELEASE] Using bundled script: {}", release_path.display());
+            release_path
+        };
 
         if !script_path.exists() {
-            return Err(format!("Python script not found at: {}", script_path.display()));
+            return Err(format!(
+                "Python script not found at: {}\n\
+                Dev mode: {}\n\
+                Tip: Ensure the script exists in the correct location",
+                script_path.display(),
+                cfg!(debug_assertions)
+            ));
         }
 
         // Copy script to WSL
@@ -515,8 +572,13 @@ async fn start_petals_seeder(
         println!("[WSL] Time synchronized via WSL restart");
         
         // Build the command to run the script in WSL with virtual environment
+        // CRITICAL: Set LD_LIBRARY_PATH for CUDA libraries BEFORE running Python
+        // This fixes the "CUDA Setup failed" errors that occur after a few minutes
         let command = format!(
-            "source ~/.torbiz_venv/bin/activate && python3 {} --model-name '{}' --node-token '{}' --device cuda --port 31337 2>&1",
+            "export LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda-12/lib64:/usr/local/cuda-11/lib64:/usr/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH && \
+             export CUDA_HOME=/usr/local/cuda && \
+             source ~/.torbiz_venv/bin/activate && \
+             python3 {} --model-name '{}' --node-token '{}' --device cuda --port 31337 2>&1",
             wsl_script_path,
             model_name,
             node_token
@@ -524,7 +586,8 @@ async fn start_petals_seeder(
 
         println!("[PETALS] Running WSL command: {}", command);
 
-        // Create command and hide console window on Windows
+        // Create command - SHOW the terminal window for better debugging and stability
+        // Visible terminal allows users to see real-time logs and helps prevent WSL subprocess issues
         let mut cmd = Command::new("wsl");
         cmd.arg("-e")
             .arg("bash")
@@ -533,13 +596,10 @@ async fn start_petals_seeder(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        // On Windows, hide the console window using creation flags
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            cmd.creation_flags(CREATE_NO_WINDOW);
-        }
+        // DO NOT hide the console window - this improves debugging and stability
+        // The visible terminal provides real-time feedback and prevents environment issues
+        println!("[PETALS] Terminal window will open - this is normal and helps with stability");
+        println!("[PETALS] You can minimize the window, but do not close it while sharing GPU");
 
         let mut child = cmd
             .spawn()
@@ -640,13 +700,36 @@ async fn start_petals_seeder(
     {
         let python_exe = if cfg!(target_os = "macos") { "python3" } else { "python3" };
 
-        let script_path = app
-            .path()
-            .resolve("py/run_petals_seeder.py", BaseDirectory::Resource)
-            .map_err(|e| format!("Failed to resolve resource path: {}", e))?;
+        // Get the script path - in dev mode, load from source; in release, load from resources
+        let script_path = if cfg!(debug_assertions) {
+            // DEV MODE: Load from source directory for hot reloading
+            let mut dev_path = std::env::current_dir()
+                .map_err(|e| format!("Failed to get current directory: {}", e))?;
+            dev_path.push("src-tauri");
+            dev_path.push("py");
+            dev_path.push("run_petals_seeder.py");
+            
+            println!("[PETALS-DEV] Using source script for hot reloading: {}", dev_path.display());
+            dev_path
+        } else {
+            // RELEASE MODE: Load from bundled resources
+            let release_path = app
+                .path()
+                .resolve("py/run_petals_seeder.py", BaseDirectory::Resource)
+                .map_err(|e| format!("Failed to resolve resource path: {}", e))?;
+            
+            println!("[PETALS-RELEASE] Using bundled script: {}", release_path.display());
+            release_path
+        };
 
         if !script_path.exists() {
-            return Err(format!("Python script not found at: {}", script_path.display()));
+            return Err(format!(
+                "Python script not found at: {}\n\
+                Dev mode: {}\n\
+                Tip: Ensure the script exists in the correct location",
+                script_path.display(),
+                cfg!(debug_assertions)
+            ));
         }
 
         println!("[PETALS] Starting seeder with script: {}", script_path.display());
@@ -864,10 +947,10 @@ pub fn run() {
             get_petals_seeder_info,
             get_petals_seeder_logs,
         ])
-        .setup(|app| {
+        .setup(|_app| {
             #[cfg(debug_assertions)]
             {
-                let window = app.get_webview_window("main").unwrap();
+                let window = _app.get_webview_window("main").unwrap();
                 window.open_devtools();
             }
             Ok(())

@@ -749,23 +749,11 @@ function ShareGpuModal({ isOpen, onClose }) {
                   Even GPUs with limited VRAM can contribute by hosting one or more shards.
                 </div>
 
-                {/* Terminal window info for Windows users */}
-                {isWindows && wslSetupComplete && (
-                  <div className="alert-box info" style={{ fontSize: '0.85em', marginTop: '0.5rem' }}>
-                    <p style={{ margin: '0 0 0.5rem 0' }}>
-                      💡 <strong>Terminal Window:</strong> A terminal window will open when you start sharing. This is normal and improves stability.
-                    </p>
-                    <p style={{ margin: '0', fontSize: '0.9em' }}>
-                      You can minimize it, but don't close it while sharing your GPU. The window shows real-time logs and prevents CUDA library errors.
-                    </p>
-                  </div>
-                )}
-                
                 {/* Time sync info for WSL users */}
                 {isWindows && wslSetupComplete && (
                   <div className="alert-box info" style={{ fontSize: '0.85em', marginTop: '0.5rem' }}>
                     <p style={{ margin: 0 }}>
-                      ⏰ <strong>Time Sync:</strong> If you get time errors after sleep/hibernate, just restart the app to resync WSL.
+                      💡 <strong>Tip:</strong> WSL automatically syncs time when starting. If you get time errors after sleep/hibernate, just restart the app.
                     </p>
                   </div>
                 )}

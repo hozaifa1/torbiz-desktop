@@ -74,44 +74,6 @@ def main():
         import os
         os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"  # Disable telemetry
         
-        # ===== CRITICAL: Configure CUDA library paths for bitsandbytes =====
-        # This is the ROOT CAUSE of the "CUDA Setup failed" errors that appear after a few minutes
-        # When Petals reloads blocks, bitsandbytes needs to find CUDA libraries via LD_LIBRARY_PATH
-        
-        # Detect CUDA installation paths (common locations)
-        cuda_paths = [
-            "/usr/local/cuda/lib64",
-            "/usr/local/cuda-12/lib64",
-            "/usr/local/cuda-11/lib64",
-            "/usr/lib/x86_64-linux-gnu",  # Ubuntu/Debian system CUDA
-        ]
-        
-        # Find valid CUDA paths
-        valid_cuda_paths = [path for path in cuda_paths if os.path.exists(path)]
-        
-        if valid_cuda_paths:
-            # Set LD_LIBRARY_PATH to include CUDA libraries
-            existing_ld_path = os.environ.get("LD_LIBRARY_PATH", "")
-            cuda_lib_path = ":".join(valid_cuda_paths)
-            
-            if existing_ld_path:
-                os.environ["LD_LIBRARY_PATH"] = f"{cuda_lib_path}:{existing_ld_path}"
-            else:
-                os.environ["LD_LIBRARY_PATH"] = cuda_lib_path
-            
-            # Set CUDA_HOME (helps some libraries find CUDA)
-            if os.path.exists("/usr/local/cuda"):
-                os.environ["CUDA_HOME"] = "/usr/local/cuda"
-            
-            logger.info("="*60)
-            logger.info("CUDA Library Configuration:")
-            logger.info("LD_LIBRARY_PATH: %s", os.environ.get("LD_LIBRARY_PATH", "NOT SET"))
-            logger.info("CUDA_HOME: %s", os.environ.get("CUDA_HOME", "NOT SET"))
-            logger.info("="*60)
-        else:
-            logger.warning("No CUDA library paths found. GPU acceleration may not work.")
-            logger.warning("Searched paths: %s", cuda_paths)
-        
         # Configure bitsandbytes to use CUDA 12.3 binaries (compatible with CUDA 11.7-12.8)
         # This fixes "libbitsandbytes_cuda128.so not found" errors on newer CUDA versions
         # See: https://huggingface.co/docs/bitsandbytes/installation

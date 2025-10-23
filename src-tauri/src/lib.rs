@@ -253,11 +253,21 @@ fn install_wsl() -> Result<(), String> {
 
 #[cfg(target_os = "windows")]
 fn execute_wsl_command(command: &str) -> Result<String, String> {
-    let output = Command::new("wsl")
-        .arg("-e")
+    let mut cmd = Command::new("wsl");
+    cmd.arg("-e")
         .arg("bash")
         .arg("-c")
-        .arg(command)
+        .arg(command);
+
+    // Hide the console window on Windows
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = cmd
         .output()
         .map_err(|e| format!("Failed to execute WSL command: {}", e))?;
 
@@ -308,11 +318,22 @@ fn install_wsl_python() -> Result<(), String> {
 fn check_wsl_petals() -> bool {
     #[cfg(target_os = "windows")]
     {
-        match execute_wsl_command("python3 -c 'import petals; print(petals.__version__)' 2>/dev/null || echo 'not_found'") {
+        // Check if virtual environment exists and petals can be imported
+        let venv_check = execute_wsl_command("test -d ~/.torbiz_venv && echo 'exists' || echo 'missing'");
+        
+        if let Ok(output) = venv_check {
+            if output.trim() == "missing" {
+                println!("[WSL] Virtual environment not found");
+                return false;
+            }
+        }
+        
+        // Try to import petals and check if it works
+        match execute_wsl_command("~/.torbiz_venv/bin/python3 -c 'import petals; import torch; print(\"ok\")' 2>/dev/null || echo 'not_found'") {
             Ok(output) => {
                 let trimmed = output.trim();
                 println!("[WSL] Petals check output: {}", trimmed);
-                !trimmed.is_empty() && trimmed != "not_found"
+                trimmed == "ok"
             }
             Err(e) => {
                 println!("[WSL] Petals check failed: {}", e);
@@ -327,20 +348,31 @@ fn check_wsl_petals() -> bool {
 fn install_wsl_petals() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        // Official Petals installation method (from petals.dev documentation):
+        // python -m pip install git+https://github.com/bigscience-workshop/petals
+        // This single command handles ALL dependencies including PyTorch, Hivemind, etc.
+        
         println!("[WSL] Setting up Python virtual environment...");
+        // Remove old broken environment if it exists
+        execute_wsl_command("rm -rf ~/.torbiz_venv").ok(); // Ignore errors if doesn't exist
         execute_wsl_command("python3 -m venv ~/.torbiz_venv")?;
         
-        println!("[WSL] Installing Petals and dependencies in virtual environment...");
+        println!("[WSL] Upgrading pip...");
         execute_wsl_command("~/.torbiz_venv/bin/pip install --upgrade pip")?;
         
-        println!("[WSL] Installing PyTorch (this may take several minutes)...");
-        execute_wsl_command(
-            "~/.torbiz_venv/bin/pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu"
-        )?;
+        println!("[WSL] Installing Petals from GitHub (this will take 5-10 minutes and install all dependencies including PyTorch)...");
+        println!("[WSL] Please wait, this is downloading large packages (~3GB)...");
+        execute_wsl_command("~/.torbiz_venv/bin/python -m pip install git+https://github.com/bigscience-workshop/petals")?;
         
-        println!("[WSL] Installing Petals...");
-        execute_wsl_command("~/.torbiz_venv/bin/pip install petals")?;
-        execute_wsl_command("~/.torbiz_venv/bin/pip install hivemind accelerate")?;
+        println!("[WSL] Verifying installation...");
+        let verify_result = execute_wsl_command(
+            "~/.torbiz_venv/bin/python3 -c 'import petals; import torch; print(f\"Petals: {petals.__version__}, PyTorch: {torch.__version__}\")'"
+        );
+        
+        match verify_result {
+            Ok(output) => println!("[WSL] Installation verified: {}", output.trim()),
+            Err(e) => println!("[WSL] Warning: Could not verify installation: {}", e),
+        }
         
         println!("[WSL] Petals installation completed");
         Ok(())
@@ -391,28 +423,32 @@ async fn setup_wsl_environment(
             });
         };
 
-        emit_progress("checking_wsl", "Checking WSL installation...", 10);
+        emit_progress("checking_wsl", "Checking WSL installation... (Terminal windows may open/close - this is normal)", 10);
         if !check_wsl_installed() {
-            emit_progress("installing_wsl", "Installing WSL (this may take a few minutes)...", 20);
+            emit_progress("installing_wsl", "Installing WSL (this may take a few minutes). Terminal windows may appear - please don't close them.", 20);
             install_wsl()?;
             
             emit_progress("wsl_installed", "WSL installed. System restart may be required.", 40);
             return Err("WSL has been installed but requires a system restart. Please restart your computer and try again.".to_string());
         }
 
-        emit_progress("checking_python", "Checking Python in WSL...", 50);
+        emit_progress("checking_python", "Checking Python in WSL... (Terminal windows may flash - this is normal)", 50);
         if !check_wsl_python() {
-            emit_progress("installing_python", "Installing Python in WSL...", 60);
+            emit_progress("installing_python", "Installing Python in WSL... Please wait, terminal windows may appear.", 60);
             install_wsl_python()?;
         }
 
-        emit_progress("checking_petals", "Checking Petals library...", 70);
-        if !check_wsl_petals() {
-            emit_progress("installing_petals", "Installing Petals library (this may take several minutes)...", 80);
+        emit_progress("checking_petals", "Checking Petals library... (Don't close any terminal windows that appear)", 70);
+        let petals_ok = check_wsl_petals();
+        
+        if !petals_ok {
+            emit_progress("installing_petals", "Installing Petals (~3GB download, 5-10 min). Terminal windows will open/close automatically - please wait...", 80);
             install_wsl_petals()?;
+        } else {
+            println!("[WSL] Petals already installed and working");
         }
 
-        emit_progress("complete", "WSL environment setup complete!", 100);
+        emit_progress("complete", "WSL environment setup complete! You can now share your GPU.", 100);
         Ok("WSL environment is ready for Petals".to_string())
     }
 }
@@ -472,32 +508,63 @@ async fn start_petals_seeder(
 
         println!("[PETALS] Running WSL command: {}", command);
 
-        let mut child = Command::new("wsl")
-            .arg("-e")
+        // Create command and hide console window on Windows
+        let mut cmd = Command::new("wsl");
+        cmd.arg("-e")
             .arg("bash")
             .arg("-c")
             .arg(&command)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        // On Windows, hide the console window using creation flags
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = cmd
             .spawn()
             .map_err(|e| format!("Failed to spawn Petals in WSL: {}", e))?;
 
         let child_id = child.id();
         println!("[PETALS] Spawned WSL process with PID: {}", child_id);
 
-        // Capture stdout/stderr for logging
+        // Capture stdout/stderr for logging with error detection
         if let Some(stdout) = child.stdout.take() {
             let logs = state.seeder_logs.clone();
+            let app_handle = app.clone();
             thread::spawn(move || {
                 let reader = BufReader::new(stdout);
                 for line in reader.lines() {
                     if let Ok(line) = line {
                         println!("[PETALS-OUT] {}", line);
-                        let mut logs_guard = logs.lock().unwrap();
-                        logs_guard.push(line);
-                        // Keep only last 100 lines
-                        if logs_guard.len() > 100 {
-                            logs_guard.remove(0);
+                        
+                        // Detect errors and emit events
+                        let is_error = line.contains("[ERROR]") || line.contains("Traceback") || line.contains("Error:") || line.contains("TypeError");
+                        let is_success = line.contains("✓✓✓ MODEL LOADED SUCCESSFULLY ✓✓✓");
+                        
+                        // Clone line for emitting if needed
+                        let line_for_emit = if is_error { Some(line.clone()) } else { None };
+                        
+                        // Store in logs
+                        {
+                            let mut logs_guard = logs.lock().unwrap();
+                            logs_guard.push(line);
+                            // Keep only last 100 lines
+                            if logs_guard.len() > 100 {
+                                logs_guard.remove(0);
+                            }
+                        }
+                        
+                        // Emit events after releasing lock
+                        if let Some(error_msg) = line_for_emit {
+                            let _ = app_handle.emit("petals_error", error_msg);
+                        }
+                        if is_success {
+                            let _ = app_handle.emit("petals_success", "Model loaded successfully");
                         }
                     }
                 }

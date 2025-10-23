@@ -151,6 +151,8 @@ function ShareGpuModal({ isOpen, onClose }) {
   const [showShardInfo, setShowShardInfo] = useState(false);
   const [seederLogs, setSeederLogs] = useState([]);
   const [showLogs, setShowLogs] = useState(false);
+  const [seederError, setSeederError] = useState(null);
+  const [hasNvidiaGpu, setHasNvidiaGpu] = useState(false);
 
   // Reset only UI transient state, preserve sharing state
   const resetModalState = () => {
@@ -216,9 +218,9 @@ function ShareGpuModal({ isOpen, onClose }) {
     }
   }, [isOpen, gpuVram]);
 
-  // Detect platform
+  // Detect platform and GPU
   useEffect(() => {
-    const checkPlatform = async () => {
+    const checkPlatformAndGpu = async () => {
       if (isTauriEnvironment()) {
         try {
           const osModule = await import('@tauri-apps/plugin-os');
@@ -232,8 +234,26 @@ function ShareGpuModal({ isOpen, onClose }) {
           setIsWindows(isWindowsFallback);
         }
       }
+      
+      // Check for NVIDIA GPU
+      try {
+        const info = await getHardwareInfo();
+        setHardwareInfo(info);
+        const vram = extractVramFromGpuInfo(info.gpu_info);
+        console.log('[GPU-VRAM] Detected max GPU VRAM:', vram, 'GB');
+        setGpuVram(vram);
+        
+        // Check if any GPU is NVIDIA
+        const hasNvidia = info.gpu_info.some(gpu => 
+          gpu.toLowerCase().includes('nvidia') || gpu.toLowerCase().includes('geforce') || gpu.toLowerCase().includes('rtx') || gpu.toLowerCase().includes('gtx')
+        );
+        setHasNvidiaGpu(hasNvidia);
+        console.log('[GPU-CHECK] Has NVIDIA GPU:', hasNvidia);
+      } catch (error) {
+        console.error('[GPU-CHECK] Failed:', error);
+      }
     };
-    checkPlatform();
+    checkPlatformAndGpu();
   }, []);
 
   // Fetch hardware info and extract VRAM
@@ -261,23 +281,42 @@ function ShareGpuModal({ isOpen, onClose }) {
   useEffect(() => {
     if (!isTauriEnvironment()) return;
 
-    let unlisten;
-    const setupListener = async () => {
+    let unlistenProgress, unlistenError, unlistenSuccess;
+    const setupListeners = async () => {
       try {
         const { listen } = await import('@tauri-apps/api/event');
-        unlisten = await listen('wsl_setup_progress', (event) => {
+        
+        // WSL setup progress
+        unlistenProgress = await listen('wsl_setup_progress', (event) => {
           console.log('[WSL-SETUP] Progress:', event.payload);
           setWslSetupProgress(event.payload);
         });
+        
+        // Petals error detection
+        unlistenError = await listen('petals_error', (event) => {
+          console.error('[PETALS-ERROR]', event.payload);
+          setSeederError(event.payload);
+          setStatus('error-seeder');
+          setMessage('Petals failed to start. Please check the error details below.');
+        });
+        
+        // Petals success detection
+        unlistenSuccess = await listen('petals_success', (event) => {
+          console.log('[PETALS-SUCCESS]', event.payload);
+          setSeederError(null);
+          // Success is already set by the main handler
+        });
       } catch (error) {
-        console.error('[WSL-SETUP] Failed to setup listener:', error);
+        console.error('[EVENT-LISTENERS] Failed to setup:', error);
       }
     };
 
-    setupListener();
+    setupListeners();
 
     return () => {
-      if (unlisten) unlisten();
+      if (unlistenProgress) unlistenProgress();
+      if (unlistenError) unlistenError();
+      if (unlistenSuccess) unlistenSuccess();
     };
   }, []);
 
@@ -410,15 +449,39 @@ function ShareGpuModal({ isOpen, onClose }) {
 
       console.log("[SHARE-GPU] Petals seeder started:", seederResult);
       
-      // *** ADD: Wait a moment and verify seeder is actually running ***
-      await new Promise(resolve => setTimeout(resolve, 3000)); // Wait 3 seconds
+      setStatus('loading-seeder-verify');
+      setMessage('Waiting for Petals to connect (this may take 2-5 minutes)...');
       
-      const isRunning = await invoke('is_petals_seeder_running');
-      if (!isRunning) {
-        throw new Error('Seeder process terminated unexpectedly. Check logs for errors.');
+      // Wait for actual success event or timeout after 5 minutes
+      const startTime = Date.now();
+      const timeout = 5 * 60 * 1000; // 5 minutes
+      
+      while (Date.now() - startTime < timeout) {
+        await new Promise(resolve => setTimeout(resolve, 2000)); // Check every 2 seconds
+        
+        // Check if process is still running
+        const isRunning = await invoke('is_petals_seeder_running');
+        if (!isRunning) {
+          throw new Error('Seeder process stopped unexpectedly. Please check the error details.');
+        }
+        
+        // If seederError was set by event listener, break
+        if (seederError) {
+          throw new Error('Seeder encountered an error during startup.');
+        }
+        
+        // Check logs for success marker
+        const logs = await invoke('get_petals_seeder_logs');
+        if (logs.some(log => log.includes('✓✓✓ MODEL LOADED SUCCESSFULLY ✓✓✓'))) {
+          console.log("[SHARE-GPU] Seeder verified - model loaded successfully");
+          break;
+        }
       }
       
-      console.log("[SHARE-GPU] Seeder verified running");
+      // If we timeout, still show a message but don't fail
+      if (Date.now() - startTime >= timeout) {
+        console.warn("[SHARE-GPU] Timeout waiting for model load, but process is running");
+      }
 
       // Calculate and show shard contribution info
       const hostableShards = gpuVram
@@ -525,9 +588,9 @@ function ShareGpuModal({ isOpen, onClose }) {
   if (!isOpen) return null;
 
   const isLoading = status === 'loading-register' || status === 'loading-seeder' || 
-                    status === 'loading-stop' || status === 'wsl-setup';
+                    status === 'loading-seeder-verify' || status === 'loading-stop' || status === 'wsl-setup';
   const isSharing = status === 'success' || status === 'error-stop' || 
-                    status === 'loading-stop' || status === 'error-seeder';
+                    status === 'loading-stop' || status === 'error-seeder' || status === 'loading-seeder-verify';
 
   // Get selected model info for display
   const selectedModelInfo = supportedModels.find(m => m.id === selectedModel);
@@ -551,6 +614,25 @@ function ShareGpuModal({ isOpen, onClose }) {
         {/* WSL Setup Required */}
         {isWindows && !wslSetupComplete && status === 'idle' && (
           <>
+            {!hasNvidiaGpu && (
+              <div style={{
+                backgroundColor: '#f8d7da',
+                border: '1px solid #f5c6cb',
+                borderRadius: '6px',
+                padding: '1rem',
+                marginBottom: '1rem',
+                textAlign: 'left'
+              }}>
+                <h4 style={{ margin: '0 0 0.5rem 0', color: '#721c24' }}>
+                  <AlertTriangle size={18} style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+                  No NVIDIA GPU Detected
+                </h4>
+                <p style={{ margin: '0', fontSize: '0.9em', color: '#721c24' }}>
+                  Petals requires an NVIDIA GPU for best performance. Your system appears to have {hardwareInfo?.gpu_info?.[0] || 'a non-NVIDIA GPU'}. You can still proceed, but performance will be limited (CPU-only mode).
+                </p>
+              </div>
+            )}
+            
             <div style={{
               backgroundColor: '#fff3cd',
               border: '1px solid #ffc107',
@@ -564,7 +646,13 @@ function ShareGpuModal({ isOpen, onClose }) {
                 First-Time Setup Required
               </h4>
               <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9em', color: '#856404' }}>
-                To run Petals on Windows, we need to set up a Linux environment (WSL). This is a one-time process.
+                To run Petals on Windows, we need to set up a Linux environment (WSL). This is a one-time process that will take 5-10 minutes.
+              </p>
+              <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.85em', color: '#856404', fontStyle: 'italic' }}>
+                ⚠️ During setup, you may see terminal windows opening and closing automatically. This is normal - please don't close them manually.
+              </p>
+              <p style={{ margin: '0', fontSize: '0.85em', color: '#856404' }}>
+                The app will download ~3GB of packages. Please ensure you have a stable internet connection.
               </p>
             </div>
             <button 
@@ -588,7 +676,33 @@ function ShareGpuModal({ isOpen, onClose }) {
             <p style={{ fontWeight: '600', marginTop: '1rem', marginBottom: '0.5rem' }}>
               {wslSetupProgress.stage === 'complete' ? 'Setup Complete!' : 'Setting Up Environment...'}
             </p>
-            <p style={{ fontSize: '0.9em', color: '#666' }}>{wslSetupProgress.message}</p>
+            <p style={{ fontSize: '0.9em', color: '#333', marginBottom: '1rem' }}>{wslSetupProgress.message}</p>
+            
+            {/* Keep warning visible during entire setup */}
+            {wslSetupProgress.stage !== 'complete' && (
+              <div style={{
+                backgroundColor: '#fff3cd',
+                border: '1px solid #ffc107',
+                borderRadius: '6px',
+                padding: '0.75rem',
+                marginBottom: '1rem',
+                fontSize: '0.85em',
+                textAlign: 'left'
+              }}>
+                <p style={{ margin: '0 0 0.5rem 0', fontWeight: '500', color: '#856404' }}>
+                  ⚠️ Please wait - do not close the app
+                </p>
+                <p style={{ margin: '0 0 0.3rem 0', color: '#856404' }}>
+                  • Terminal windows may open/close automatically - this is normal
+                </p>
+                <p style={{ margin: '0 0 0.3rem 0', color: '#856404' }}>
+                  • Downloading ~3GB of packages
+                </p>
+                <p style={{ margin: '0', color: '#856404' }}>
+                  • Estimated time: 5-10 minutes
+                </p>
+              </div>
+            )}
             
             <div style={{
               width: '100%',
@@ -596,7 +710,7 @@ function ShareGpuModal({ isOpen, onClose }) {
               backgroundColor: '#e0e0e0',
               borderRadius: '4px',
               overflow: 'hidden',
-              marginTop: '1rem'
+              marginTop: '0.5rem'
             }}>
               <div style={{
                 width: `${wslSetupProgress.progress}%`,
@@ -787,23 +901,72 @@ function ShareGpuModal({ isOpen, onClose }) {
         )}
 
         {/* Loading States */}
-        {isLoading && status !== 'wsl-setup' && (
+        {(isLoading || status === 'loading-seeder-verify') && status !== 'wsl-setup' && (
           <div className="status-display">
             <Loader size={48} className="spinner" />
-            <p style={{ marginTop: '1rem' }}>
+            <p style={{ marginTop: '1rem', fontWeight: '600' }}>
               {status === 'loading-register' && 'Registering your GPU...'}
               {status === 'loading-seeder' && 'Starting Petals seeder...'}
+              {status === 'loading-seeder-verify' && 'Connecting to Petals network...'}
               {status === 'loading-stop' && 'Stopping seeder...'}
             </p>
+            {status === 'loading-seeder-verify' && (
+              <p style={{ fontSize: '0.85em', color: '#666', marginTop: '0.5rem' }}>
+                This may take 2-5 minutes. The model is downloading and connecting to peers...
+              </p>
+            )}
           </div>
         )}
 
         {/* Success/Sharing State */}
         {isSharing && status !== 'loading-stop' && (
           <div className="status-display">
-            {status === 'success' && <CheckCircle size={48} color="#28a745" />}
-            {(status === 'error-stop' || status === 'error-seeder') && 
+            {status === 'success' && !seederError && <CheckCircle size={48} color="#28a745" />}
+            {(status === 'error-stop' || status === 'error-seeder' || seederError) && 
               <AlertTriangle size={48} color="#dc3545" />}
+            
+            {/* Show seeder error prominently */}
+            {seederError && (
+              <div style={{
+                backgroundColor: '#f8d7da',
+                border: '1px solid #f5c6cb',
+                borderRadius: '6px',
+                padding: '1rem',
+                marginTop: '1rem',
+                marginBottom: '1rem',
+                textAlign: 'left',
+                width: '100%'
+              }}>
+                <h4 style={{ margin: '0 0 0.5rem 0', color: '#721c24' }}>
+                  <AlertTriangle size={18} style={{ verticalAlign: 'middle', marginRight: '8px' }} />
+                  Petals Failed to Start
+                </h4>
+                <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.85em', color: '#721c24' }}>
+                  {seederError.includes('device') ? 'The model configuration is incompatible. This may be because:' :
+                   seederError.includes('CUDA') || seederError.includes('GPU') ? 'GPU error occurred:' :
+                   'An error occurred:'}
+                </p>
+                <div style={{
+                  backgroundColor: '#fff',
+                  padding: '0.5rem',
+                  borderRadius: '4px',
+                  fontSize: '0.75em',
+                  fontFamily: 'monospace',
+                  color: '#333',
+                  maxHeight: '100px',
+                  overflow: 'auto',
+                  marginBottom: '0.5rem'
+                }}>
+                  {seederError}
+                </div>
+                {!hasNvidiaGpu && (
+                  <p style={{ margin: '0', fontSize: '0.85em', color: '#721c24', fontStyle: 'italic' }}>
+                    💡 Tip: Petals requires an NVIDIA GPU. Your system has {hardwareInfo?.gpu_info?.[0] || 'a non-NVIDIA GPU'}, which may cause compatibility issues.
+                  </p>
+                )}
+              </div>
+            )}
+            
             <p style={{ 
               color: (status === 'error-stop' || status === 'error-seeder') ? '#dc3545' : 'inherit',
               marginTop: '1rem'

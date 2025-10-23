@@ -350,8 +350,8 @@ fn install_wsl_petals() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         // Official Petals installation method (from petals.dev documentation):
-        // python -m pip install git+https://github.com/bigscience-workshop/petals
-        // This single command handles ALL dependencies including PyTorch, Hivemind, etc.
+        // Let Petals install its preferred PyTorch version, then configure bitsandbytes compatibility
+        // This avoids conflicts with Petals' dependency tree
         
         println!("[WSL] Setting up Python virtual environment...");
         // Remove old broken environment if it exists
@@ -364,9 +364,6 @@ fn install_wsl_petals() -> Result<(), String> {
         println!("[WSL] Installing Petals from GitHub (this will take 5-10 minutes and install all dependencies including PyTorch)...");
         println!("[WSL] Please wait, this is downloading large packages (~3GB)...");
         execute_wsl_command("~/.torbiz_venv/bin/python -m pip install git+https://github.com/bigscience-workshop/petals")?;
-        
-        // NOTE: Keep bitsandbytes installed - it's needed for GPU quantization
-        // CPU compatibility issues are handled via environment variable at runtime
         
         println!("[WSL] Verifying installation...");
         let verify_result = execute_wsl_command(

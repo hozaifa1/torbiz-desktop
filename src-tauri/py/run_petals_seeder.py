@@ -74,6 +74,12 @@ def main():
         import os
         os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"  # Disable telemetry
         
+        # Configure bitsandbytes to use CUDA 12.3 binaries (compatible with CUDA 11.7-12.8)
+        # This fixes "libbitsandbytes_cuda128.so not found" errors on newer CUDA versions
+        # See: https://huggingface.co/docs/bitsandbytes/installation
+        os.environ["BNB_CUDA_VERSION"] = "123"  # Use CUDA 12.3 binaries (most compatible)
+        logger.info("bitsandbytes configured for CUDA 12.3 compatibility (works with CUDA 11.7+)")
+        
         # Run the Petals server CLI
         # This is the CORRECT way to host model shards
         from petals.cli.run_server import main as run_server_main

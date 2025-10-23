@@ -724,6 +724,16 @@ function ShareGpuModal({ isOpen, onClose }) {
                 <p style={{ marginBottom: '0.5rem' }}>
                   Your system has: <strong>{hardwareInfo?.gpu_info?.[0] || 'Unknown GPU'}</strong>
                 </p>
+                <p style={{ marginBottom: '0.5rem', fontSize: '0.9em' }}>
+                  {hardwareInfo?.gpu_info?.[0]?.toLowerCase().includes('amd') || hardwareInfo?.gpu_info?.[0]?.toLowerCase().includes('radeon') ? (
+                    <>
+                      <strong>AMD GPUs are powerful hardware,</strong> but Petals v2.3.0 depends on CUDA (NVIDIA-exclusive). 
+                      AMD uses ROCm instead, which Petals doesn't currently support.
+                    </>
+                  ) : (
+                    <>This is a limitation of the Petals framework, not your hardware.</>
+                  )}
+                </p>
                 <p style={{ margin: 0, fontSize: '0.9em', fontStyle: 'italic' }}>
                   💡 You can still use Torbiz to chat with models hosted by other users on the network. GPU sharing is only needed to contribute computing power.
                 </p>

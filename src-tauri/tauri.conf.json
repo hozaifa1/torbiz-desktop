@@ -44,6 +44,9 @@
       "icons/icon.ico"
     ],
     "publisher": "Torbiz Team",
-    "resources": ["py/run_petals_seeder.py"]
+    "resources": [
+      "py/run_petals_seeder.py",
+      "py/run_petals_inference.py"
+    ]
   }
 }

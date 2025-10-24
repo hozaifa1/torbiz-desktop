@@ -153,6 +153,8 @@ function ShareGpuModal({ isOpen, onClose }) {
   const [showLogs, setShowLogs] = useState(false);
   const [seederError, setSeederError] = useState(null);
   const [hasNvidiaGpu, setHasNvidiaGpu] = useState(false);
+  const [hfToken, setHfToken] = useState(''); // Hugging Face token (optional)
+  const [showHfTokenInput, setShowHfTokenInput] = useState(false);
   const logsEndRef = useRef(null);
 
   // Reset only UI transient state, preserve sharing state
@@ -167,6 +169,8 @@ function ShareGpuModal({ isOpen, onClose }) {
     }
     setWslSetupProgress({ stage: '', message: '', progress: 0 });
     setShowShardInfo(false);
+    setHfToken('');
+    setShowHfTokenInput(false);
   };
 
   // Check if currently sharing when modal opens
@@ -401,13 +405,6 @@ function ShareGpuModal({ isOpen, onClose }) {
   };
 
   const handleShare = async () => {
-    // Step 0: Block if no NVIDIA GPU
-    if (!hasNvidiaGpu) {
-      setStatus('error-register');
-      setMessage('GPU sharing requires an NVIDIA graphics card. Your system does not have a compatible GPU.');
-      return;
-    }
-
     // Step 1: On Windows, ensure WSL is set up first
     if (isWindows && !wslSetupComplete) {
       await handleWslSetup();
@@ -498,10 +495,19 @@ function ShareGpuModal({ isOpen, onClose }) {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       
-      const seederResult = await invoke('start_petals_seeder', {
+      // Prepare arguments for Petals seeder
+      const seederArgs = {
         modelName: selectedModel,
         nodeToken: receivedToken
-      });
+      };
+      
+      // Add HuggingFace token if provided
+      if (hfToken.trim()) {
+        seederArgs.hfToken = hfToken.trim();
+        console.log("[SHARE-GPU] Using provided HuggingFace token");
+      }
+      
+      const seederResult = await invoke('start_petals_seeder', seederArgs);
 
       console.log("[SHARE-GPU] Petals seeder started:", seederResult);
       
@@ -711,15 +717,15 @@ function ShareGpuModal({ isOpen, onClose }) {
         {/* Idle State - Model Selection */}
         {(status === 'idle' || status === 'wsl-ready' || status === 'error-register') && (!isWindows || wslSetupComplete) && (
           <>
-            {/* NVIDIA GPU Required Warning - Show if no NVIDIA GPU detected */}
+            {/* CPU/GPU Warning - Show if no NVIDIA GPU detected */}
             {!hasNvidiaGpu && (
-              <div className="alert-box error" style={{ textAlign: 'left' }}>
+              <div className="alert-box warning" style={{ textAlign: 'left' }}>
                 <h4>
                   <AlertTriangle size={18} />
-                  NVIDIA GPU Required
+                  CPU-Only Mode
                 </h4>
                 <p style={{ marginBottom: '0.5rem' }}>
-                  GPU sharing with Petals requires an NVIDIA graphics card with CUDA support.
+                  No NVIDIA GPU detected. You'll be running in CPU-only mode with limited performance.
                 </p>
                 <p style={{ marginBottom: '0.5rem' }}>
                   Your system has: <strong>{hardwareInfo?.gpu_info?.[0] || 'Unknown GPU'}</strong>
@@ -728,39 +734,34 @@ function ShareGpuModal({ isOpen, onClose }) {
                   {hardwareInfo?.gpu_info?.[0]?.toLowerCase().includes('amd') || hardwareInfo?.gpu_info?.[0]?.toLowerCase().includes('radeon') ? (
                     <>
                       <strong>AMD GPUs are powerful hardware,</strong> but Petals v2.3.0 depends on CUDA (NVIDIA-exclusive). 
-                      AMD uses ROCm instead, which Petals doesn't currently support.
+                      You can still contribute using your CPU, but with reduced performance.
                     </>
                   ) : (
-                    <>This is a limitation of the Petals framework, not your hardware.</>
+                    <>You can still contribute to the network using your CPU, though performance will be limited.</>
                   )}
                 </p>
                 <p style={{ margin: 0, fontSize: '0.9em', fontStyle: 'italic' }}>
-                  💡 You can still use Torbiz to chat with models hosted by other users on the network. GPU sharing is only needed to contribute computing power.
+                  💡 CPU mode can host lightweight models and still helps the network!
                 </p>
               </div>
             )}
 
-            {/* Show model selection only if NVIDIA GPU detected */}
-            {hasNvidiaGpu && (
-              <>
-                {/* Info banner about Petals sharding */}
-                <div className="alert-box info" style={{ fontSize: '0.9em' }}>
-                  <strong>How Petals Works:</strong> Large AI models are split into shards distributed across the network. 
-                  Even GPUs with limited VRAM can contribute by hosting one or more shards.
-                </div>
+            {/* Info banner about Petals sharding */}
+            <div className="alert-box info" style={{ fontSize: '0.9em' }}>
+              <strong>How Petals Works:</strong> Large AI models are split into shards distributed across the network. 
+              Even {hasNvidiaGpu ? 'GPUs with limited VRAM' : 'CPUs'} can contribute by hosting one or more shards.
+            </div>
 
-                {/* Time sync info for WSL users */}
-                {isWindows && wslSetupComplete && (
-                  <div className="alert-box info" style={{ fontSize: '0.85em', marginTop: '0.5rem' }}>
-                    <p style={{ margin: 0 }}>
-                      💡 <strong>Tip:</strong> WSL automatically syncs time when starting. If you get time errors after sleep/hibernate, just restart the app.
-                    </p>
-                  </div>
-                )}
-              </>
+            {/* Time sync info for WSL users */}
+            {isWindows && wslSetupComplete && (
+              <div className="alert-box info" style={{ fontSize: '0.85em', marginTop: '0.5rem' }}>
+                <p style={{ margin: 0 }}>
+                  💡 <strong>Tip:</strong> WSL automatically syncs time when starting. If you get time errors after sleep/hibernate, just restart the app.
+                </p>
+              </div>
             )}
 
-            {hasNvidiaGpu && status === 'error-register' && (
+            {status === 'error-register' && (
               <div className="status-display error">
                 <AlertTriangle size={20} style={{ marginRight: '8px', flexShrink: 0 }}/>
                 <p style={{ margin: 0 }}>{message}</p>
@@ -780,8 +781,21 @@ function ShareGpuModal({ isOpen, onClose }) {
                 <strong>Your GPU:</strong> {gpuVram.toFixed(1)}GB VRAM detected
               </div>
             )}
+            
+            {/* CPU Mode Info */}
+            {!hasNvidiaGpu && (
+              <div style={{
+                backgroundColor: 'hsl(var(--secondary))',
+                padding: '0.75rem',
+                borderRadius: 'calc(var(--radius) - 2px)',
+                marginBottom: '1rem',
+                fontSize: '0.9em',
+                border: '1px solid hsl(var(--border))'
+              }}>
+                <strong>Compute Mode:</strong> CPU-only (limited to small models and single shard)
+              </div>
+            )}
 
-            {hasNvidiaGpu && (
             <div className="form-group">
               <label htmlFor="model-select">Choose model to host:</label>
               <select
@@ -792,9 +806,11 @@ function ShareGpuModal({ isOpen, onClose }) {
                 style={{ marginBottom: '0.5rem' }}
               >
                 {supportedModels.map(model => {
-                  const canHost = gpuVram !== null 
-                    ? calculateHostableShards(gpuVram, model.vramPerShard) > 0
-                    : true;
+                  // For GPU: check VRAM capacity
+                  // For CPU: only allow smallest models (TinyLlama or Gemma 2B)
+                  const canHost = hasNvidiaGpu 
+                    ? (gpuVram !== null ? calculateHostableShards(gpuVram, model.vramPerShard) > 0 : true)
+                    : (model.totalShards === 1 && model.vramPerShard <= 2.0); // CPU: only single-shard small models
                   
                   return (
                     <option 
@@ -809,7 +825,7 @@ function ShareGpuModal({ isOpen, onClose }) {
                     >
                       {canHost ? '✓ ' : '✗ '}
                       {model.name} ({model.totalShards} shards, {model.vramPerShard}GB/shard)
-                      {!canHost && ' - Insufficient VRAM'}
+                      {!canHost && (hasNvidiaGpu ? ' - Insufficient VRAM' : ' - Too large for CPU')}
                     </option>
                   );
                 })}
@@ -847,10 +863,15 @@ function ShareGpuModal({ isOpen, onClose }) {
                           fontWeight: '500'
                         }}>
                           {hostableShards > 0 ? (
-                            <>✓ Your GPU can host ~{hostableShards} shard{hostableShards !== 1 ? 's' : ''}</>
+                            <>✓ Your {hasNvidiaGpu ? 'GPU' : 'CPU'} can host ~{hostableShards} shard{hostableShards !== 1 ? 's' : ''}</>
                           ) : (
-                            <>✗ Your GPU cannot host any shard of this model</>
+                            <>✗ Your {hasNvidiaGpu ? 'GPU' : 'CPU'} cannot host any shard of this model</>
                           )}
+                        </div>
+                      )}
+                      {!hasNvidiaGpu && selectedModelInfo.totalShards === 1 && selectedModelInfo.vramPerShard <= 2.0 && (
+                        <div className="alert-box warning" style={{ marginTop: '0.5rem', padding: '0.5rem', fontSize: '0.85em' }}>
+                          ⚠️ CPU mode: Limited to 1 shard with reduced performance
                         </div>
                       )}
                     </div>
@@ -888,22 +909,85 @@ function ShareGpuModal({ isOpen, onClose }) {
                 </div>
               )}
             </div>
-            )}
 
-            {hasNvidiaGpu && (
-              <>
-                <button 
-                  className="modal-action-btn primary" 
-                  onClick={handleShare} 
-                  disabled={isLoading || (hostableShards !== null && hostableShards === 0)}
-                >
-                  {status === 'error-register' ? 'Try Again' : 'Start Sharing'}
-                </button>
-              </>
-            )}
+            {/* Hugging Face Token Input (Optional) */}
+            <div className="form-group" style={{ marginTop: '1rem' }}>
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'space-between',
+                  marginBottom: '0.5rem'
+                }}>
+                  <label htmlFor="hf-token" style={{ margin: 0 }}>
+                    Hugging Face Token <span className="text-muted" style={{ fontSize: '0.85em' }}>(optional)</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowHfTokenInput(!showHfTokenInput)}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: '#1a73e8',
+                      cursor: 'pointer',
+                      fontSize: '0.85em',
+                      textDecoration: 'underline',
+                      padding: '0'
+                    }}
+                  >
+                    {showHfTokenInput ? 'Hide' : 'Show'}
+                  </button>
+                </div>
+                
+                {showHfTokenInput && (
+                  <>
+                    <input
+                      id="hf-token"
+                      type="password"
+                      value={hfToken}
+                      onChange={(e) => setHfToken(e.target.value)}
+                      placeholder="hf_xxxxxxxxxxxxxxxxxxxxx"
+                      disabled={isLoading}
+                      style={{
+                        width: '100%',
+                        padding: '0.5rem',
+                        borderRadius: 'calc(var(--radius) - 2px)',
+                        border: '1px solid hsl(var(--border))',
+                        fontSize: '0.9em',
+                        fontFamily: 'monospace'
+                      }}
+                    />
+                    <div className="alert-box info" style={{ 
+                      fontSize: '0.8em', 
+                      marginTop: '0.5rem',
+                      textAlign: 'left'
+                    }}>
+                      <p style={{ margin: 0 }}>
+                        <strong>When do you need this?</strong> Some models (like Meta's Llama series) 
+                        require authentication. Get your token from{' '}
+                        <a 
+                          href="https://huggingface.co/settings/tokens" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          style={{ color: '#1a73e8', textDecoration: 'underline' }}
+                        >
+                          HuggingFace Settings
+                        </a>.
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+
+            <button 
+              className="modal-action-btn primary" 
+              onClick={handleShare} 
+              disabled={isLoading || (hostableShards !== null && hostableShards === 0)}
+            >
+              {status === 'error-register' ? 'Try Again' : 'Start Sharing'}
+            </button>
             
             <button className="modal-action-btn secondary" onClick={handleClose}>
-              {hasNvidiaGpu ? 'Cancel' : 'Close'}
+              Cancel
             </button>
           </>
         )}
@@ -1004,9 +1088,9 @@ function ShareGpuModal({ isOpen, onClose }) {
                 }}>
                   {seederError}
                 </div>
-                {!hasNvidiaGpu && (
+                {!hasNvidiaGpu && seederError.toLowerCase().includes('cuda') && (
                   <p style={{ margin: '0', fontSize: '0.9em', fontStyle: 'italic' }}>
-                    💡 Tip: Petals requires an NVIDIA GPU. Your system has {hardwareInfo?.gpu_info?.[0] || 'a non-NVIDIA GPU'}, which may cause compatibility issues.
+                    💡 Note: You're running in CPU mode. Your system has {hardwareInfo?.gpu_info?.[0] || 'a non-NVIDIA GPU'}. Some CUDA-related errors are expected.
                   </p>
                 )}
               </div>

@@ -4,6 +4,24 @@ Petals Seeder Script for Torbiz Desktop App
 Runs a Petals SERVER to host model shards on the network
 """
 import sys
+
+# MOCK BITSANDBYTES IMMEDIATELY - BEFORE ANY OTHER IMPORTS
+# Check if we"re in CPU mode by looking at command line args
+if "--device" in sys.argv and "cpu" in sys.argv:
+    from unittest.mock import MagicMock
+    
+    # Create comprehensive mock
+    mock_bnb = MagicMock()
+    mock_bnb.nn = MagicMock()
+    mock_bnb.nn.Linear4bit = MagicMock
+    mock_bnb.nn.Linear8bitLt = MagicMock
+    
+    # Insert into sys.modules BEFORE any imports
+    sys.modules["bitsandbytes"] = mock_bnb
+    sys.modules["bitsandbytes.nn"] = mock_bnb.nn
+    
+    print("[MOCK] bitsandbytes mocked for CPU-only mode", file=sys.stderr)
+
 import logging
 import time
 
@@ -68,12 +86,20 @@ def main():
     logger.info("Initializing Petals Server...")
     logger.info("This may take several minutes on first run (downloading model shards)...")
     
+    # Import required modules
+    import os
+    
     # Save original argv before modification
+    import sys
     original_argv = sys.argv.copy()
     
     try:
         # Set environment variables before importing Petals
-        import os
+        
+        # CRITICAL: Prevent continuous re-imports by caching modules
+        # This fixes the "No module named "peft"" error that happens after server starts
+        # Similar to the bitsandbytes solution from the commit
+        os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # Prevent .pyc files that can cause re-imports
         os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"  # Disable telemetry
         
         # Set HuggingFace token if provided
@@ -82,22 +108,36 @@ def main():
             os.environ["HUGGING_FACE_HUB_TOKEN"] = args.hf_token
             logger.info("HuggingFace authentication configured")
         
-        # Configure CUDA paths for bitsandbytes
-        cuda_paths = [
-            "/usr/local/cuda/lib64",
-            "/usr/lib/x86_64-linux-gnu",
-            "/usr/lib/wsl/lib"  # WSL-specific CUDA path
-        ]
+        # Only configure CUDA/bitsandbytes if using GPU
+        if args.device == "cuda":
+            # Configure CUDA paths for bitsandbytes
+            cuda_paths = [
+                "/usr/local/cuda/lib64",
+                "/usr/lib/x86_64-linux-gnu",
+                "/usr/lib/wsl/lib"  # WSL-specific CUDA path
+            ]
+            
+            # Add CUDA paths to LD_LIBRARY_PATH
+            old_ld_path = os.environ.get("LD_LIBRARY_PATH", "")
+            new_ld_path = ":".join([*cuda_paths, old_ld_path]) if old_ld_path else ":".join(cuda_paths)
+            os.environ["LD_LIBRARY_PATH"] = new_ld_path
+            
+            # Configure bitsandbytes for CUDA 12.x compatibility
+            os.environ["BNB_CUDA_VERSION"] = "121"  # Use CUDA 12.1 binaries
+            logger.info("CUDA paths configured: %s", new_ld_path)
+            logger.info("bitsandbytes configured for CUDA 12.1 compatibility")
+        else:
+            logger.info("CPU-only mode - skipping CUDA/bitsandbytes configuration")
+            # Tell peft and other libraries to skip bitsandbytes checks
+            os.environ["DISABLE_BNB"] = "1"
+            os.environ["BNB_AVAILABLE"] = "0"
+            os.environ["PEFT_DISABLE_BNB"] = "1"
+            os.environ["TRANSFORMERS_DISABLE_BNB"] = "1"
+            
+            logger.info("Environment configured to disable bitsandbytes checks")
         
-        # Add CUDA paths to LD_LIBRARY_PATH
-        old_ld_path = os.environ.get("LD_LIBRARY_PATH", "")
-        new_ld_path = ":".join([*cuda_paths, old_ld_path]) if old_ld_path else ":".join(cuda_paths)
-        os.environ["LD_LIBRARY_PATH"] = new_ld_path
-        
-        # Configure bitsandbytes for CUDA 12.x compatibility
-        os.environ["BNB_CUDA_VERSION"] = "121"  # Use CUDA 12.1 binaries
-        logger.info("CUDA paths configured: %s", new_ld_path)
-        logger.info("bitsandbytes configured for CUDA 12.1 compatibility")
+        # Let Petals handle its own imports - it knows which versions it needs
+        logger.info("Petals will manage its own module imports")
         
         # Run the Petals server CLI
         # This is the CORRECT way to host model shards

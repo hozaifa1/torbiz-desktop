@@ -11,6 +11,7 @@ import HardwareInfoDisplay from '../components/HardwareInfoDisplay';
 import ShareGpuModal from '../components/ShareGpuModal';
 import api from '../services/api';
 import { streamInference, createInference } from '../services/inferenceService';
+import { runDirectInference, checkPetalsEnvironment } from '../services/directInferenceService';
 
 // --- Placeholder Data ---
 const chatHistory = [
@@ -30,6 +31,19 @@ function ChatPage() {
   const [modelsLoading, setModelsLoading] = useState(true);
   const [modelsError, setModelsError] = useState(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  
+  // Testing mode - direct Petals inference
+  const [isTestingMode, setIsTestingMode] = useState(false);
+  const [petalsEnvStatus, setPetalsEnvStatus] = useState({
+    ready: false,
+    needsSetup: false,
+    platform: 'unknown',
+    message: 'Checking...'
+  });
+  const [isSettingUpPetals, setIsSettingUpPetals] = useState(false);
+  const [petalsLogs, setPetalsLogs] = useState([]);
+  const [showPetalsLogs, setShowPetalsLogs] = useState(false);
+  const [showSetupConfirmation, setShowSetupConfirmation] = useState(false);
 
   // Message and streaming state
   const [messages, setMessages] = useState([]);
@@ -93,6 +107,35 @@ function ChatPage() {
     }
   }, [messages, currentStreamingMessage]);
 
+  // Don't check environment on mount - only when user clicks Direct Mode button
+  // This makes the app start instantly without blocking checks
+
+  // No need to re-check on modal close - check happens when user clicks Direct Mode button
+
+  // Listen for WSL setup progress events
+  useEffect(() => {
+    let unlisten;
+    
+    const setupListener = async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      
+      unlisten = await listen('wsl_setup_progress', (event) => {
+        const { stage, message, progress } = event.payload;
+        setPetalsLogs(prev => [...prev, `[${progress}%] ${message}`]);
+      });
+    };
+    
+    if (isSettingUpPetals) {
+      setupListener();
+    }
+    
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+    };
+  }, [isSettingUpPetals]);
+
   // Handle send message
   const handleSendMessage = async () => {
     const trimmedInput = inputValue.trim();
@@ -113,12 +156,31 @@ function ChatPage() {
       return;
     }
 
-    if (!user?.id) {
+    // Check if testing mode is enabled but Petals isn't ready
+    if (isTestingMode && !petalsEnvStatus.ready) {
+      setStreamError('Direct mode requires Petals to be installed. ' + petalsEnvStatus.message);
+      return;
+    }
+    
+    // Check if selected model is compatible with Petals (not GGUF)
+    if (isTestingMode && selectedModel?.id) {
+      if (selectedModel.id.includes('GGUF') || selectedModel.id.includes('gguf')) {
+        setStreamError('GGUF models are not compatible with Petals. Please select a different model.');
+        return;
+      }
+    }
+
+    // Only check user ID if NOT in testing mode (backend needs it, direct mode doesn't)
+    if (!isTestingMode && !user?.id) {
       setStreamError('User session error. Please log in again.');
       return;
     }
 
-    console.log('[CHAT] Sending message:', { model: selectedModel.id, length: trimmedInput.length });
+    console.log('[CHAT] Sending message:', { 
+      model: selectedModel.id, 
+      length: trimmedInput.length,
+      mode: isTestingMode ? 'DIRECT' : 'BACKEND'
+    });
 
     // Clear input immediately for better UX
     setInputValue('');
@@ -140,26 +202,62 @@ function ChatPage() {
     setCurrentStreamingMessage('');
 
     try {
-      // Start streaming inference
-      const abortFn = await streamInference(
-        selectedModel.id,
-        trimmedInput,
-        user.id,
-        // onToken callback
-        (token) => {
-          setCurrentStreamingMessage(prev => prev + token);
-        },
-        // onComplete callback
-        () => {
-          console.log('[CHAT] Stream completed');
-          handleStreamComplete();
-        },
-        // onError callback
-        (error) => {
-          console.error('[CHAT] Stream error:', error);
-          handleStreamError(error);
-        }
-      );
+      let abortFn;
+      
+      // Choose between direct inference (testing mode) or backend inference
+      if (isTestingMode) {
+        console.log('[CHAT] Using DIRECT PETALS INFERENCE (testing mode)');
+        
+        // Clear old logs and show panel
+        setPetalsLogs(['🔄 Starting new inference...']);
+        setShowPetalsLogs(true);
+        
+        abortFn = await runDirectInference(
+          selectedModel.id,
+          trimmedInput,
+          // onToken callback
+          (token) => {
+            setCurrentStreamingMessage(prev => prev + token);
+          },
+          // onComplete callback
+          () => {
+            console.log('[CHAT] Direct inference completed');
+            handleStreamComplete();
+          },
+          // onError callback
+          (error) => {
+            console.error('[CHAT] Direct inference error:', error);
+            handleStreamError(error);
+          },
+          // onLog callback - capture inference logs
+          (logMessage) => {
+            setPetalsLogs(prev => [...prev, logMessage]);
+          }
+        );
+      } else {
+        console.log('[CHAT] Using BACKEND INFERENCE (normal mode)');
+        
+        // Start streaming inference via backend
+        abortFn = await streamInference(
+          selectedModel.id,
+          trimmedInput,
+          user.id,
+          // onToken callback
+          (token) => {
+            setCurrentStreamingMessage(prev => prev + token);
+          },
+          // onComplete callback
+          () => {
+            console.log('[CHAT] Stream completed');
+            handleStreamComplete();
+          },
+          // onError callback
+          (error) => {
+            console.error('[CHAT] Stream error:', error);
+            handleStreamError(error);
+          }
+        );
+      }
 
       // Store abort function
       abortStreamRef.current = abortFn;
@@ -229,6 +327,92 @@ function ChatPage() {
       setCurrentStreamingMessage('');
       setIsStreaming(false);
       abortStreamRef.current = null;
+    }
+  };
+
+  // Handle Direct Mode toggle with automatic setup
+  const handleDirectModeToggle = async () => {
+    console.log('[DIRECT-MODE-TOGGLE] Clicked!');
+    
+    // If already ON, just turn OFF
+    if (isTestingMode) {
+      console.log('[DIRECT-MODE-TOGGLE] Turning OFF');
+      setIsTestingMode(false);
+      setPetalsLogs(prev => [...prev, '🔌 Direct Mode disabled']);
+      return;
+    }
+    
+    // Trying to turn ON - check environment first
+    console.log('[DIRECT-MODE-TOGGLE] Checking environment...');
+    setShowSetupConfirmation(true);  // Open the setup modal
+    
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const isPetalsReady = await invoke('check_petals_inference_ready');
+      
+      if (isPetalsReady) {
+        // Ready! Just toggle ON
+        console.log('[DIRECT-MODE-TOGGLE] Petals ready, enabling Direct Mode');
+        setIsTestingMode(true);
+        setShowPetalsLogs(true);
+        setPetalsLogs(['⚡ Direct Mode enabled - ready for inference']);
+        setShowSetupConfirmation(false);
+      } else {
+        // Needs setup - modal stays open showing setup UI
+        console.log('[DIRECT-MODE-TOGGLE] Petals not ready, showing setup flow');
+      }
+    } catch (error) {
+      console.error('[DIRECT-MODE-TOGGLE] Check failed:', error);
+      // Modal stays open, will show setup flow
+    }
+  };
+
+  // Actually start the setup after confirmation
+  const startPetalsSetup = async () => {
+    setIsSettingUpPetals(true);
+    setPetalsLogs(['🚀 Starting setup process...']);
+    
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      setPetalsLogs(prev => [...prev, '🔍 Checking WSL installation...']);
+      
+      // Setup WSL environment for client inference (minimal dependencies)
+      await invoke('setup_wsl_environment_client');
+      await invoke('mark_wsl_setup_complete');
+      
+      setPetalsLogs(prev => [...prev, '✅ WSL and Petals installed successfully!']);
+      setPetalsLogs(prev => [...prev, '🔍 Verifying installation...']);
+      
+      // Verify it's ready
+      const isPetalsReady = await invoke('check_petals_inference_ready');
+      
+      if (isPetalsReady) {
+        setPetalsLogs(prev => [...prev, '✅ Direct Mode is ready!']);
+        setPetalsLogs(prev => [...prev, '⚡ Enabling Direct Mode...']);
+        
+        // Refresh environment status to unblock message sending
+        const updatedStatus = await checkPetalsEnvironment();
+        setPetalsEnvStatus(updatedStatus);
+        
+        // Wait a moment for user to see success
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Enable Direct Mode and close modal
+        setIsTestingMode(true);
+        setShowPetalsLogs(true);
+        setShowSetupConfirmation(false);
+        setPetalsLogs(['⚡ Direct Mode enabled - ready for inference']);
+      } else {
+        setPetalsLogs(prev => [...prev, '⚠️ Setup completed but verification failed']);
+        setPetalsLogs(prev => [...prev, '💡 Try restarting the app or check the Share GPU button']);
+      }
+    } catch (error) {
+      console.error('[DIRECT-MODE] Setup failed:', error);
+      setPetalsLogs(prev => [...prev, `❌ Setup failed: ${error}`]);
+      setPetalsLogs(prev => [...prev, '💡 You can also use the Share GPU button to set up WSL']);
+    } finally {
+      setIsSettingUpPetals(false);
     }
   };
 
@@ -355,31 +539,44 @@ function ChatPage() {
               </button>
               {isModelDropdownOpen && !modelsLoading && !modelsError && models.length > 0 && (
                 <ul className="model-dropdown" role="listbox">
-                  {models.map(model => (
-                    <li
-                      key={model.id}
-                      className={!model.available ? 'disabled' : ''}
-                      title={!model.available ? 'Model currently unavailable' : model.description || model.name}
-                      onClick={() => {
-                        if (model.available) {
-                          setSelectedModel(model);
-                          setIsModelDropdownOpen(false);
+                  {models.map(model => {
+                    const isGGUF = model.id.includes('GGUF') || model.id.includes('gguf');
+                    const incompatibleWithDirectMode = isTestingMode && isGGUF;
+                    
+                    return (
+                      <li
+                        key={model.id}
+                        className={!model.available || incompatibleWithDirectMode ? 'disabled' : ''}
+                        title={
+                          incompatibleWithDirectMode 
+                            ? 'GGUF models not compatible with Direct Mode' 
+                            : !model.available 
+                              ? 'Model currently unavailable' 
+                              : model.description || model.name
                         }
-                      }}
-                      role="option"
-                      aria-selected={selectedModel?.id === model.id}
-                    >
-                      <span className="model-name">
-                        {model.name} {!model.available && '(Unavailable)'}
-                      </span>
-                      <span className="model-provider">{model.provider}</span>
-                      {model.minGpuMemory && (
-                        <span className="text-muted" style={{ fontSize: '0.8em' }}>
-                          Requires {model.minGpuMemory}GB+ VRAM
+                        onClick={() => {
+                          if (model.available && !incompatibleWithDirectMode) {
+                            setSelectedModel(model);
+                            setIsModelDropdownOpen(false);
+                          }
+                        }}
+                        role="option"
+                        aria-selected={selectedModel?.id === model.id}
+                      >
+                        <span className="model-name">
+                          {model.name} 
+                          {!model.available && ' (Unavailable)'}
+                          {incompatibleWithDirectMode && ' ⚠️ Not compatible with Direct Mode'}
                         </span>
-                      )}
-                    </li>
-                  ))}
+                        <span className="model-provider">{model.provider}</span>
+                        {model.minGpuMemory && (
+                          <span className="text-muted" style={{ fontSize: '0.8em' }}>
+                            Requires {model.minGpuMemory}GB+ VRAM
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
@@ -387,6 +584,27 @@ function ChatPage() {
 
           {/* Header Actions */}
           <div className="header-actions">
+            {/* Direct Mode Toggle - Always available, checks on click */}
+            <button 
+              className={`gpu-share-btn ${isTestingMode ? 'active' : ''}`}
+              onClick={handleDirectModeToggle}
+              style={{
+                backgroundColor: isTestingMode ? 'hsl(var(--primary))' : 'hsl(var(--primary) / 0.15)',
+                color: isTestingMode ? 'hsl(var(--primary-foreground))' : 'hsl(var(--primary))',
+                border: isTestingMode ? 'none' : '1px solid hsl(var(--primary) / 0.3)',
+              }}
+              title={
+                isTestingMode 
+                  ? 'Direct Mode Active - Click to disable' 
+                  : 'Connect directly to Petals network - Click to enable'
+              }
+            >
+              <span style={{ fontSize: '1.2em' }}>⚡</span>
+              <span>
+                {isTestingMode ? 'Direct Mode: ON' : 'Direct Mode'}
+              </span>
+            </button>
+            
             <button className="gpu-share-btn" onClick={() => setIsShareModalOpen(true)}>
               <Share2 size={16} />
               <span>Share GPU</span>
@@ -550,6 +768,26 @@ function ChatPage() {
                 Powered by decentralized GPU network · 
                 {selectedModel ? ` Using ${selectedModel.name}` : ' Select a model to begin'}
               </p>
+              {isTestingMode && petalsEnvStatus.ready && (
+                <div className="alert-box info" style={{ maxWidth: '600px', marginTop: '1rem' }}>
+                  <p style={{ margin: 0, fontSize: '0.9em', marginBottom: '0.5rem' }}>
+                    ⚡ <strong>Direct Petals Mode Active</strong> - Your messages connect directly to the Petals network, 
+                    bypassing the backend server.
+                  </p>
+                  <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9 }}>
+                    ⚠️ <strong>Note:</strong> GGUF models are not compatible. Use models like TinyLlama, Llama-2, or other standard HuggingFace models.
+                  </p>
+                </div>
+              )}
+              {isSettingUpPetals && (
+                <div className="alert-box info" style={{ maxWidth: '600px', marginTop: '1rem' }}>
+                  <h4>🔧 Setting Up Direct Mode...</h4>
+                  <p style={{ margin: 0, fontSize: '0.9em' }}>
+                    Installing WSL and Petals. This may take a few minutes. 
+                    Check the Setup Logs at the bottom for progress.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
@@ -708,15 +946,90 @@ function ChatPage() {
             )}
           </div>
           <div className="chat-input-footer">
-            Powered by Torbiz distributed network · 
-            {models.length > 0 && ` ${models.filter(m => m.available).length} models available`}
+            {isTestingMode ? (
+              <span style={{ color: 'hsl(var(--primary))' }}>
+                ⚡ Direct Petals Mode - Bypassing backend
+              </span>
+            ) : (
+              <>
+                Powered by Torbiz distributed network · 
+                {models.length > 0 && ` ${models.filter(m => m.available).length} models available`}
+              </>
+            )}
             {streamError && (
               <span style={{ color: 'hsl(var(--destructive-foreground))', marginLeft: '1rem' }}>
                 · {streamError}
               </span>
             )}
+            {(isTestingMode || petalsLogs.length > 0) && (
+              <button
+                onClick={() => setShowPetalsLogs(!showPetalsLogs)}
+                style={{
+                  marginLeft: '1rem',
+                  padding: '0.25rem 0.5rem',
+                  fontSize: '0.75rem',
+                  backgroundColor: 'hsl(var(--secondary))',
+                  border: '1px solid hsl(var(--border))',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  color: 'hsl(var(--foreground))',
+                }}
+              >
+                {showPetalsLogs ? '▼' : '▶'} Petals Logs {petalsLogs.length > 0 && `(${petalsLogs.length})`}
+              </button>
+            )}
           </div>
         </div>
+
+        {/* Petals Setup/Inference Logs Panel (side panel, compact) */}
+        {showPetalsLogs && (
+          <div style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            width: '400px',
+            maxHeight: '300px',
+            backgroundColor: 'hsl(var(--card))',
+            border: '2px solid hsl(var(--primary))',
+            borderRadius: 'var(--radius)',
+            padding: '0.75rem',
+            overflowY: 'auto',
+            zIndex: 1000,
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', position: 'sticky', top: 0, backgroundColor: 'hsl(var(--card))', paddingBottom: '0.5rem', borderBottom: '1px solid hsl(var(--border))' }}>
+              <h4 style={{ margin: 0, fontSize: '0.85rem', color: 'hsl(var(--foreground))' }}>
+                🔧 Petals Logs
+              </h4>
+              <button
+                onClick={() => setShowPetalsLogs(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.1rem',
+                  cursor: 'pointer',
+                  color: 'hsl(var(--muted-foreground))',
+                  padding: '4px',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            <div style={{ fontSize: '0.75rem', lineHeight: '1.4', fontFamily: 'monospace' }}>
+              {petalsLogs.length > 0 ? (
+                petalsLogs.map((log, index) => (
+                  <div key={index} style={{ marginBottom: '4px', wordBreak: 'break-word' }}>
+                    {log}
+                  </div>
+                ))
+              ) : (
+                <div style={{ color: 'hsl(var(--muted-foreground))', fontStyle: 'italic' }}>
+                  Waiting for logs...
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Share GPU Modal */}
@@ -724,6 +1037,95 @@ function ChatPage() {
         isOpen={isShareModalOpen}
         onClose={() => setIsShareModalOpen(false)}
       />
+
+      {/* Direct Mode Setup Modal - Similar to Share GPU Modal */}
+      {showSetupConfirmation && (
+        <div className="modal-overlay" onClick={() => !isSettingUpPetals && setShowSetupConfirmation(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '550px' }}>
+            {!isSettingUpPetals && (
+              <button 
+                className="modal-close-btn" 
+                onClick={() => setShowSetupConfirmation(false)}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            )}
+            
+            <h2 style={{ marginBottom: '1rem' }}>⚡ Direct Petals Mode</h2>
+            
+            {!isSettingUpPetals ? (
+              <>
+                <div className="alert-box info" style={{ marginBottom: '1rem' }}>
+                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>What is Direct Mode?</h4>
+                  <p style={{ margin: 0, fontSize: '0.9em' }}>
+                    Connect directly to the Petals decentralized network for AI inference, 
+                    bypassing the backend server. Perfect for testing!
+                  </p>
+                </div>
+                
+                <div className="alert-box warning" style={{ marginBottom: '1.5rem' }}>
+                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>🔧 Requirements</h4>
+                  <p style={{ margin: '0.5rem 0' }}>
+                    Automatic installation of:
+                  </p>
+                  <ul style={{ margin: '0.5rem 0', paddingLeft: '1.5rem' }}>
+                    <li><strong>WSL</strong> (Windows Subsystem for Linux)</li>
+                    <li><strong>Petals library</strong> (~3GB download)</li>
+                    <li><strong>Additional packages</strong> (peft, accelerate)</li>
+                  </ul>
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em' }}>
+                    ⏱️ First-time setup: 5-10 minutes
+                  </p>
+                </div>
+                
+                <button 
+                  className="modal-action-btn primary"
+                  onClick={startPetalsSetup}
+                >
+                  🚀 Start Setup & Enable Direct Mode
+                </button>
+                
+                <button 
+                  className="modal-action-btn secondary"
+                  onClick={() => setShowSetupConfirmation(false)}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <div className="alert-box info" style={{ marginBottom: '1rem' }}>
+                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>🔧 Setting Up...</h4>
+                  <p style={{ margin: 0, fontSize: '0.9em' }}>
+                    Installing WSL and Petals. This may take several minutes.
+                    Please don't close this window.
+                  </p>
+                </div>
+                
+                {petalsLogs.length > 0 && (
+                  <div className="log-display" style={{ maxHeight: '250px', marginBottom: '1rem' }}>
+                    {petalsLogs.map((log, index) => (
+                      <div key={index} className="log-line" style={{ marginBottom: '4px' }}>
+                        {log}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                <div style={{ textAlign: 'center', padding: '1rem' }}>
+                  <div className="spinner" style={{ width: '32px', height: '32px', margin: '0 auto' }}>
+                    <Loader size={32} className="spinner" />
+                  </div>
+                  <p style={{ marginTop: '1rem', fontSize: '0.9em', color: 'hsl(var(--muted-foreground))' }}>
+                    Setup in progress...
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

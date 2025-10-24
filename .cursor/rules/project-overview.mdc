@@ -18,4 +18,9 @@ The codes that i have rn works perfectly well (ex. for the problem mentioned). S
 The internal architecture, model sharding, hosting and using will be structured upon the existing open source petals project by bigscienceworkshop. So check the petals official github codes to suggest the workflow and codes.
 For now I am only responsible for the frontend.
 The current project works perfectly — all existing functionalities (logins, chat interface, hardware info retrieval, GPU sharing button, etc.) are fully functional and stable. Do not break or modify the existing structure, versions, or dependencies.
+
 All new features must be built on top of the current setup without altering or disrupting what already works.
+***MUST FOLLOW THIS*** NEVER EVER MAKE ANY .md or .txt files explaining the changes, implementation details or any other documentation. Just make the changes and move on.
+
+No need to do cargo check or cargo build or cargo run or npm run dev or any other cargo or npm commands. Just make the changes, fix linter errors and move on.
+Always use "..."(double quotes) for string and never use '...'(single quotes).

@@ -1085,7 +1085,7 @@ async fn stop_petals_seeder(
             }
 
             use std::time::Duration;
-            let timeout = Duration::from_secs(5);
+            let timeout = Duration::from_secs(5000);
             let start = std::time::Instant::now();
 
             loop {

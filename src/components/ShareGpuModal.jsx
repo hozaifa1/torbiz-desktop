@@ -108,8 +108,8 @@ function calculateHostableShards(gpuVramGB, vramPerShard) {
 function canHostOnCpu(totalRAMGB, model) {
   if (!totalRAMGB || totalRAMGB <= 0) return true; // Default to allowing if RAM unknown
   
-  // Leave at least 2GB for system, use 70% of remaining RAM
-  const usableRAM = Math.max(0, (totalRAMGB - 2.0) * 0.7);
+  // Leave at least 2GB for system, use 90% of remaining RAM
+  const usableRAM = Math.max(0, (totalRAMGB - 2.0) * 0.9);
   
   // Model can be hosted if at least ONE block fits in available RAM
   // This allows CPU to contribute even to large models by hosting a few blocks

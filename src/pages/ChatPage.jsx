@@ -44,6 +44,7 @@ function ChatPage() {
   const [petalsLogs, setPetalsLogs] = useState([]);
   const [showPetalsLogs, setShowPetalsLogs] = useState(false);
   const [showSetupConfirmation, setShowSetupConfirmation] = useState(false);
+  const [isCheckingPetals, setIsCheckingPetals] = useState(false);
 
   // Message and streaming state
   const [messages, setMessages] = useState([]);
@@ -343,7 +344,11 @@ function ChatPage() {
       return;
     }
     
-    // Trying to turn ON - check environment first (BEFORE opening modal)
+    // IMMEDIATE FEEDBACK - Set loading state before async check
+    setIsCheckingPetals(true);
+    setPetalsLogs(['🔍 Checking Petals environment...']);
+    setShowPetalsLogs(true); // Show logs panel immediately
+    
     console.log('[DIRECT-MODE-TOGGLE] Checking environment...');
     
     try {
@@ -351,21 +356,24 @@ function ChatPage() {
       const isPetalsReady = await invoke('check_petals_inference_ready');
       
       if (isPetalsReady) {
-        // Ready! Just toggle ON without opening modal
+        // Ready! Enable Direct Mode
         console.log('[DIRECT-MODE-TOGGLE] Petals ready, enabling Direct Mode');
         setIsTestingMode(true);
         setPetalsEnvStatus({ ready: true, needsSetup: false, platform: 'detected', message: 'Petals ready for inference' });
-        setShowPetalsLogs(true);
-        setPetalsLogs(['⚡ Direct Mode enabled - ready for inference']);
+        setPetalsLogs(['✅ Environment verified', '⚡ Direct Mode enabled - ready for inference']);
       } else {
-        // Needs setup - NOW open modal
+        // Needs setup - open modal
         console.log('[DIRECT-MODE-TOGGLE] Petals not ready, showing setup modal');
+        setPetalsLogs(prev => [...prev, '⚠️ Petals not installed', '🔧 Setup required']);
         setShowSetupConfirmation(true);
       }
     } catch (error) {
       console.error('[DIRECT-MODE-TOGGLE] Check failed:', error);
-      // On error, show modal with setup option
+      setPetalsLogs(prev => [...prev, `❌ Check failed: ${error.message}`, '🔧 Setup may be required']);
       setShowSetupConfirmation(true);
+    } finally {
+      // Clear loading state
+      setIsCheckingPetals(false);
     }
   };
 
@@ -587,21 +595,35 @@ function ChatPage() {
             <button 
               className={`gpu-share-btn ${isTestingMode ? 'active' : ''}`}
               onClick={handleDirectModeToggle}
+              disabled={isCheckingPetals}
               style={{
                 backgroundColor: isTestingMode ? 'hsl(var(--primary))' : 'hsl(var(--primary) / 0.15)',
                 color: isTestingMode ? 'hsl(var(--primary-foreground))' : 'hsl(var(--primary))',
                 border: isTestingMode ? 'none' : '1px solid hsl(var(--primary) / 0.3)',
+                opacity: isCheckingPetals ? 0.7 : 1,
+                cursor: isCheckingPetals ? 'wait' : 'pointer',
               }}
               title={
-                isTestingMode 
-                  ? 'Direct Mode Active - Click to disable' 
-                  : 'Connect directly to Petals network - Click to enable'
+                isCheckingPetals
+                  ? 'Checking environment...'
+                  : isTestingMode 
+                    ? 'Direct Mode Active - Click to disable' 
+                    : 'Connect directly to Petals network - Click to enable'
               }
             >
-              <span style={{ fontSize: '1.2em' }}>⚡</span>
-              <span>
-                {isTestingMode ? 'Direct Mode: ON' : 'Direct Mode'}
-              </span>
+              {isCheckingPetals ? (
+                <>
+                  <Loader size={16} className="spinner" />
+                  <span>Checking...</span>
+                </>
+              ) : (
+                <>
+                  <span style={{ fontSize: '1.2em' }}>⚡</span>
+                  <span>
+                    {isTestingMode ? 'Direct Mode: ON' : 'Direct Mode'}
+                  </span>
+                </>
+              )}
             </button>
             
             <button className="gpu-share-btn" onClick={() => setIsShareModalOpen(true)}>

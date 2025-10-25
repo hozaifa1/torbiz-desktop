@@ -24,7 +24,7 @@ serde_json = "1"
 # System information dependencies
 sysinfo = "0.31"
 reqwest = { version = "0.12", features = ["json"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process"] }
 
 # URL encoding for OAuth
 urlencoding = "2.1"
@@ -36,3 +36,15 @@ wmi = "0.13"
 # Unix-specific dependencies for graceful process shutdown
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.27", features = ["signal"] }
+
+# Development profile - fast incremental builds
+[profile.dev]
+opt-level = 0
+incremental = true
+codegen-units = 256
+
+# Release profile - optimized for size and controlled memory usage
+[profile.release]
+opt-level = "z"
+lto = "thin"
+codegen-units = 1

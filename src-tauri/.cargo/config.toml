@@ -1,0 +1,11 @@
+[build]
+# Limit parallel compilation jobs to prevent memory overload
+jobs = 2
+
+# Enable incremental compilation for faster dev builds
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-cpu=native"]
+
+# Optimize for memory usage during compilation
+[env]
+CARGO_BUILD_JOBS = "2"

@@ -732,10 +732,11 @@ async fn start_petals_seeder(
         
         // Build the command to run the script in WSL with virtual environment
         let mut command = format!(
-            "source ~/.torbiz_venv/bin/activate && python3 {} --model-name '{}' --node-token '{}' --port 31337",
+            "source ~/.torbiz_venv/bin/activate && python3 {} --model-name '{}' --node-token '{}' --device {} --port 31337",
             wsl_script_path,
             model_name,
-            node_token
+            node_token,
+            device
         );
 
         // Add HF token if provided
@@ -902,10 +903,9 @@ async fn start_petals_seeder(
             .arg("--model-name")
             .arg(&model_name)
             .arg("--node-token")
-            .arg(&node_token);
-
-        // Add device specification
-        cmd.arg("--device").arg(device);
+            .arg(&node_token)
+            .arg("--device")
+            .arg(device);
 
         // Add HuggingFace token if provided
         if let Some(token) = hf_token {
@@ -1036,9 +1036,51 @@ async fn stop_petals_seeder(
 
             #[cfg(windows)]
             {
+                // First, try to gracefully terminate the Python process inside WSL
+                // Use the node_token to identify the specific process
+                let node_token_guard = state.node_token.lock().unwrap();
+                if let Some(token) = node_token_guard.as_ref() {
+                    println!("[PETALS] Sending graceful shutdown signal to Python process in WSL...");
+                    
+                    // Find and kill the Python process by matching the node token in command line
+                    let kill_cmd = format!(
+                        "pkill -TERM -f 'python3.*run_petals_seeder.py.*{}'",
+                        &token[..12] // Use first 12 chars of token to match
+                    );
+                    
+                    match execute_wsl_command(&kill_cmd) {
+                        Ok(_) => println!("[PETALS] Sent SIGTERM to Python process"),
+                        Err(e) => eprintln!("[PETALS] Failed to send SIGTERM: {}", e),
+                    }
+                    
+                    // Give it 3 seconds to shut down gracefully
+                    std::thread::sleep(std::time::Duration::from_secs(3));
+                    
+                    // Check if process is still running
+                    let check_cmd = format!(
+                        "pgrep -f 'python3.*run_petals_seeder.py.*{}'",
+                        &token[..12]
+                    );
+                    
+                    if let Ok(output) = execute_wsl_command(&check_cmd) {
+                        if !output.trim().is_empty() {
+                            println!("[PETALS] Process still running, forcing kill...");
+                            let force_kill_cmd = format!(
+                                "pkill -9 -f 'python3.*run_petals_seeder.py.*{}'",
+                                &token[..12]
+                            );
+                            execute_wsl_command(&force_kill_cmd).ok();
+                        } else {
+                            println!("[PETALS] Process terminated gracefully");
+                        }
+                    }
+                }
+                drop(node_token_guard);
+                
+                // Now kill the WSL wrapper process
                 match child.kill() {
-                    Ok(_) => println!("[PETALS] Sent kill signal to process {}", child.id()),
-                    Err(e) => eprintln!("[PETALS] Failed to kill process {}: {}", child.id(), e),
+                    Ok(_) => println!("[PETALS] Sent kill signal to WSL wrapper process {}", child.id()),
+                    Err(e) => eprintln!("[PETALS] Failed to kill WSL wrapper process {}: {}", child.id(), e),
                 }
             }
 
@@ -1067,6 +1109,31 @@ async fn stop_petals_seeder(
                         break;
                     }
                 }
+            }
+
+            // After the wait loop, verify the process is truly dead
+            #[cfg(windows)]
+            {
+                let node_token_guard = state.node_token.lock().unwrap();
+                if let Some(token) = node_token_guard.as_ref() {
+                    let verify_cmd = format!(
+                        "pgrep -f 'python3.*run_petals_seeder.py.*{}'",
+                        &token[..12]
+                    );
+                    
+                    if let Ok(output) = execute_wsl_command(&verify_cmd) {
+                        if !output.trim().is_empty() {
+                            println!("[PETALS] WARNING: Process still running after timeout, forcing kill...");
+                            let force_kill = format!(
+                                "pkill -9 -f 'python3.*run_petals_seeder.py.*{}'",
+                                &token[..12]
+                            );
+                            execute_wsl_command(&force_kill).ok();
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                        }
+                    }
+                }
+                drop(node_token_guard);
             }
 
             *process_guard = None;
@@ -1241,10 +1308,45 @@ async fn run_petals_inference(
             escaped_prompt
         );
 
-        // Execute and print output directly without any [INFERENCE] logs
-        let output = execute_wsl_command(&command)?;
-        println!("{}", output);  // Just print the raw output
-        Ok(output)
+        // Create command and hide console window
+        let mut cmd = Command::new("wsl");
+        cmd.arg("-e")
+            .arg("bash")
+            .arg("-c")
+            .arg(&command)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        // On Windows, hide the console window using creation flags
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn inference process: {}", e))?;
+
+        let child_id = child.id();
+        println!("[INFERENCE] Spawned process with PID: {}", child_id);
+
+        // Capture stdout for real-time log streaming
+        if let Some(stdout) = child.stdout.take() {
+            let app_handle = app.clone();
+            thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines() {
+                    if let Ok(line) = line {
+                        // Emit each log line in real-time
+                        let _ = app_handle.emit("petals_inference_log", line);
+                    }
+                }
+            });
+        }
+
+        Ok("Inference started".to_string())
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -1263,23 +1365,38 @@ async fn run_petals_inference(
         println!("[INFERENCE] Running with script: {}", script_path.display());
         println!("[INFERENCE] Model: {}", model_name);
 
-        let output = Command::new(python_exe)
-            .arg(script_path.to_str().ok_or("Invalid script path")?)
+        let mut cmd = Command::new(python_exe);
+        cmd.arg(script_path.to_str().ok_or("Invalid script path")?)
             .arg("--model-name")
             .arg(&model_name)
             .arg("--prompt")
             .arg(&prompt)
             .arg("--stream")
-            .output()
-            .map_err(|e| format!("Failed to run inference: {}", e))?;
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Inference failed: {}", stderr));
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn inference process: {}", e))?;
+
+        let child_id = child.id();
+        println!("[INFERENCE] Spawned process with PID: {}", child_id);
+
+        // Capture stdout for real-time log streaming
+        if let Some(stdout) = child.stdout.take() {
+            let app_handle = app.clone();
+            thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines() {
+                    if let Ok(line) = line {
+                        // Emit each log line in real-time
+                        let _ = app_handle.emit("petals_inference_log", line);
+                    }
+                }
+            });
         }
 
-        let result = String::from_utf8_lossy(&output.stdout).to_string();
-        Ok(result)
+        Ok("Inference started".to_string())
     }
 }
 

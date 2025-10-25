@@ -27,20 +27,76 @@ export async function runDirectInference(modelId, prompt, onToken, onComplete, o
     console.log('[DIRECT-INFERENCE] Model:', modelId);
     console.log('[DIRECT-INFERENCE] Prompt:', prompt.substring(0, 50) + '...');
 
-    if (onLog) {
-      onLog('🚀 Starting inference with model: ' + modelId);
-    }
-
     const { invoke } = await import('@tauri-apps/api/core');
-    
-    if (onLog) {
-      onLog('📡 Connecting to Petals network...');
-    }
-    
-    // Call the Tauri command (runs in WSL on Windows, native on macOS/Linux)
-    let output;
+    const { listen } = await import('@tauri-apps/api/event');
+
+    // Set up real-time log listener
+    const unlistenLog = await listen('petals_inference_log', (event) => {
+      const line = event.payload;
+      
+      // Check for Python logging prefixes
+      if (line.includes('[INFO]') || line.includes('[WARNING]')) {
+        if (onLog) onLog('📝 ' + line);
+        return;
+      }
+      
+      if (line.includes('[ERROR]')) {
+        if (onLog) onLog('❌ ' + line);
+        return;
+      }
+      
+      // Try parsing as JSON
+      try {
+        const data = JSON.parse(line);
+        
+        // Handle status updates
+        if (data.status) {
+          const statusMessages = {
+            'loading_tokenizer': '📥 Loading tokenizer...',
+            'tokenizer_loaded': '✅ Tokenizer loaded',
+            'connecting_to_network': '🌐 Connecting to Petals DHT network...',
+            'querying_dht': '🔍 Querying DHT for available blocks...',
+            'still_connecting': `⏳ ${data.message || 'Searching for blocks...'}`,
+            'connected': '✅ Connected to Petals network!'
+          };
+          if (onLog && statusMessages[data.status]) {
+            onLog(statusMessages[data.status]);
+          }
+          return;
+        }
+        
+        // Handle errors
+        if (data.error) {
+          if (onLog) onLog('❌ [ERROR] ' + data.error);
+          if (onError) onError(data.error);
+          unlistenLog();
+          return;
+        }
+        
+        // Handle completion
+        if (data.done) {
+          if (onLog) onLog('✅ Complete!');
+          if (onComplete) onComplete();
+          unlistenLog();
+          return;
+        }
+        
+        // Handle token streaming
+        const token = data.token || data.text || '';
+        if (token && onToken) {
+          onToken(token);
+        }
+      } catch (parseError) {
+        // Not JSON - show raw line if it looks important
+        if (line.includes('Traceback') || line.includes('Error') || line.includes('Exception')) {
+          if (onLog) onLog('❌ [PYTHON ERROR] ' + line);
+        }
+      }
+    });
+
+    // Start inference (returns immediately now)
     try {
-      output = await invoke('run_petals_inference', {
+      await invoke('run_petals_inference', {
         modelName: modelId,
         prompt: prompt,
       });
@@ -63,120 +119,14 @@ export async function runDirectInference(modelId, prompt, onToken, onComplete, o
       if (onError) {
         onError('Inference failed - check logs for details');
       }
+      unlistenLog();
       return () => {};
     }
 
-    console.log('[DIRECT-INFERENCE] Received output from Python script');
-    
-    // Parse the JSON lines output
-    const lines = output.trim().split('\n');
-    let tokenCount = 0;
-    let hasValidOutput = false;
-    
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      
-      // Check if line starts with logging prefixes (from Python script)
-      if (line.includes('[INFO]') || line.includes('[WARNING]')) {
-        if (onLog) {
-          onLog('📝 ' + line);
-        }
-        continue;
-      }
-      
-      if (line.includes('[ERROR]')) {
-        if (onLog) {
-          onLog('❌ ' + line);
-        }
-        continue;
-      }
-      
-      try {
-        const data = JSON.parse(line);
-        hasValidOutput = true;
-        
-        // Check for status updates with trace info
-        if (data.status) {
-          const trace = data.trace ? ` [${data.trace}]` : '';
-          const statusMessages = {
-            'loading_tokenizer': `📥 Loading tokenizer...${trace}`,
-            'tokenizer_loaded': `✅ Tokenizer loaded${trace}`,
-            'connecting_to_network': `🌐 Connecting to Petals DHT network...${trace}`,
-            'querying_dht': `🔍 Querying DHT for available blocks...${trace}`,
-            'still_connecting': `⏳ ${data.message || 'Searching for blocks...'}${trace}`,
-            'connected': `✅ Connected to Petals network!${trace}`
-          };
-          if (onLog) {
-            const message = statusMessages[data.status] || `📝 ${data.status}${trace}`;
-            onLog(message);
-          }
-          continue;
-        }
-        
-        // Check for error
-        if (data.error) {
-          console.error('[DIRECT-INFERENCE] Error:', data.error);
-          if (onLog) {
-            onLog('❌ [ERROR] ' + data.error);
-          }
-          if (onError) {
-            onError(data.error);
-          }
-          return () => {};
-        }
-        
-        // Check for completion
-        if (data.done) {
-          console.log('[DIRECT-INFERENCE] Inference complete. Tokens:', tokenCount);
-          if (onLog) {
-            onLog(`✅ Complete! Generated ${tokenCount} tokens`);
-          }
-          if (onComplete) {
-            onComplete();
-          }
-          break;
-        }
-        
-        // Process token
-        const token = data.token || data.text || '';
-        if (token) {
-          tokenCount++;
-          if (onToken) {
-            onToken(token);
-          }
-        }
-        
-      } catch (parseError) {
-        // Not JSON - might be Python stderr/stdout
-        if (line.includes('Traceback') || line.includes('Error') || line.includes('Exception')) {
-          console.error('[DIRECT-INFERENCE] Python error:', line);
-          if (onLog) {
-            onLog('❌ [PYTHON ERROR] ' + line);
-          }
-        } else if (line.trim() && !line.includes('INFO') && !line.includes('WARNING')) {
-          console.warn('[DIRECT-INFERENCE] Non-JSON output:', line);
-          if (onLog) {
-            onLog('📝 ' + line);
-          }
-        }
-      }
-    }
-    
-    // If no valid output was received, show the raw output for debugging
-    if (!hasValidOutput && output.trim()) {
-      console.error('[DIRECT-INFERENCE] No valid JSON output received. Raw output:', output);
-      if (onLog) {
-        onLog('❌ [ERROR] No valid response from Petals. Raw output:');
-        const rawLines = output.split('\n').slice(0, 10); // First 10 lines only
-        rawLines.forEach(l => l.trim() && onLog('  ' + l));
-      }
-      if (onError) {
-        onError('Petals inference failed. Check logs for details.');
-      }
-      return () => {};
-    }
-
-    console.log('[DIRECT-INFERENCE] Successfully completed inference');
+    // Return cleanup function
+    return () => {
+      unlistenLog();
+    };
 
   } catch (error) {
     console.error('[DIRECT-INFERENCE] Error:', error);
@@ -186,12 +136,8 @@ export async function runDirectInference(modelId, prompt, onToken, onComplete, o
     if (onError) {
       onError(error.message || 'Direct inference failed');
     }
+    return () => {};
   }
-
-  // Return empty abort function (not implemented for direct mode)
-  return () => {
-    console.log('[DIRECT-INFERENCE] Abort not implemented for direct mode');
-  };
 }
 
 /**

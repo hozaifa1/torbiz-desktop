@@ -544,28 +544,42 @@ function ShareGpuModal({ isOpen, onClose }) {
     }
 
     setStatus('loading-stop');
-    setMessage('Stopping Petals seeder...');
+    setMessage('Stopping Petals seeder and announcing offline...');
 
+    // Step 1: Stop the Petals process first
+    let processStopSuccess = true;
     if (isTauriEnvironment()) {
       try {
         const { invoke } = await import('@tauri-apps/api/core');
         const stopResult = await invoke('stop_petals_seeder');
         console.log("[SHARE-GPU] Petals stopped:", stopResult);
+        setMessage('Petals stopped. De-registering from network...');
       } catch (error) {
         console.error("[SHARE-GPU] Failed to stop Petals:", error);
+        processStopSuccess = false;
+        setStatus('error-stop');
+        setMessage(`Failed to stop Petals process: ${error}. You may need to restart the app.`);
+        // Don't return - still try to deregister from backend
       }
     }
 
+    // Step 2: De-register from backend (even if process stop failed)
     const deregisterResult = await deregisterGpuNode(nodeToken);
     
     if (deregisterResult.success) {
-      setStatus('idle');
-      setMessage('GPU sharing stopped successfully.');
+      if (processStopSuccess) {
+        setStatus('idle');
+        setMessage('GPU sharing stopped successfully. Node announced offline.');
+      } else {
+        setStatus('error-stop');
+        setMessage('Process may still be running, but node de-registered. Please restart the app if issues persist.');
+      }
       setNodeToken(null);
       setActiveModelId(null);
     } else {
       setStatus('error-stop');
-      setMessage(`Failed to de-register: ${deregisterResult.message}`);
+      setMessage(`Failed to de-register: ${deregisterResult.message}. Process ${processStopSuccess ? 'stopped' : 'may still be running'}.`);
+      // Don't clear nodeToken if deregistration failed - allow retry
     }
   };
 

@@ -10,11 +10,18 @@ import sys
 if "--device" in sys.argv and "cpu" in sys.argv:
     from unittest.mock import MagicMock
     
-    # Create comprehensive mock
+    # Create comprehensive mock with proper __spec__
     mock_bnb = MagicMock()
     mock_bnb.nn = MagicMock()
     mock_bnb.nn.Linear4bit = MagicMock
     mock_bnb.nn.Linear8bitLt = MagicMock
+    
+    # Add __spec__ attribute to make importlib.util.find_spec() work
+    mock_spec = MagicMock()
+    mock_spec.name = "bitsandbytes"
+    mock_spec.origin = "mocked"
+    mock_spec.submodule_search_locations = None
+    mock_bnb.__spec__ = mock_spec
     
     # Insert into sys.modules BEFORE any imports
     sys.modules["bitsandbytes"] = mock_bnb
@@ -24,6 +31,26 @@ if "--device" in sys.argv and "cpu" in sys.argv:
 
 import logging
 import time
+import signal
+import sys
+
+# Global flag for graceful shutdown
+shutdown_requested = False
+
+def signal_handler(sig, frame):
+    """Handle shutdown signals gracefully"""
+    global shutdown_requested
+    shutdown_requested = True
+    logger.info("=" * 60)
+    logger.info("Shutdown signal received - stopping Petals server gracefully...")
+    logger.info("This will announce the node offline to the DHT network")
+    logger.info("=" * 60)
+    # The server.run() will handle the actual cleanup
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
 
 # Configure logging
 logging.basicConfig(
@@ -90,7 +117,6 @@ def main():
     import os
     
     # Save original argv before modification
-    import sys
     original_argv = sys.argv.copy()
     
     try:
@@ -191,7 +217,7 @@ def main():
     except KeyboardInterrupt:
         logger.info("Received shutdown signal (Ctrl+C)")
         logger.info("Shutting down Petals server...")
-    except Exception as e:
+    except (ImportError, KeyboardInterrupt, OSError) as e:
         error_msg = str(e)
         logger.error("Unexpected error running Petals server: %s", e, exc_info=True)
         

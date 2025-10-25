@@ -209,7 +209,7 @@ function ChatPage() {
         console.log('[CHAT] Using DIRECT PETALS INFERENCE (testing mode)');
         
         // Clear old logs and show panel
-        setPetalsLogs(['🔄 Starting new inference...']);
+        setPetalsLogs([]); // Real logs will arrive via events
         setShowPetalsLogs(true);
         
         abortFn = await runDirectInference(
@@ -390,10 +390,6 @@ function ChatPage() {
       if (isPetalsReady) {
         setPetalsLogs(prev => [...prev, '✅ Direct Mode is ready!']);
         setPetalsLogs(prev => [...prev, '⚡ Enabling Direct Mode...']);
-        
-        // Refresh environment status to unblock message sending
-        const updatedStatus = await checkPetalsEnvironment();
-        setPetalsEnvStatus(updatedStatus);
         
         // Wait a moment for user to see success
         await new Promise(resolve => setTimeout(resolve, 1000));

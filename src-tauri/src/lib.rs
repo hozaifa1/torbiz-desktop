@@ -1386,7 +1386,7 @@ async fn run_petals_inference(
         if let Some(stdout) = child.stdout.take() {
             let app_handle = app.clone();
             thread::spawn(move || {
-                let reader = BufReader::new(stdout);
+                let reader = BufReader::new(stjdout);
                 for line in reader.lines() {
                     if let Ok(line) = line {
                         // Emit each log line in real-time

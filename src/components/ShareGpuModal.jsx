@@ -6,93 +6,94 @@ import { X, CheckCircle, AlertTriangle, Loader, PowerOff, Download, Info } from 
 import { isTauriEnvironment } from '../utils/tauriHelpers';
 
 // Enhanced model metadata with shard information
+// Shard counts based on actual transformer layer counts
 const supportedModels = [
-  // Small models (1-2 shards, suitable for low VRAM)
+  // Small models
   { 
     id: 'google/gemma-2-2b', 
     name: 'Gemma 2 2B', 
-    totalShards: 1,
-    vramPerShard: 2.0,
-    totalModelSize: 2.0,
-    description: 'Lightweight Google model, runs on single GPU'
+    totalShards: 18,
+    vramPerShard: 0.15,
+    totalModelSize: 2.6,
+    description: 'Lightweight Google model with 18 transformer layers'
   },
   { 
     id: 'TinyLlama/TinyLlama-1.1B-Chat-v1.0', 
     name: 'TinyLlama 1.1B Chat', 
-    totalShards: 1,
-    vramPerShard: 1.5,
-    totalModelSize: 1.5,
-    description: 'Ultra-lightweight chat model'
+    totalShards: 22,
+    vramPerShard: 0.07,
+    totalModelSize: 1.1,
+    description: 'Ultra-lightweight chat model with 22 transformer layers'
   },
   { 
     id: 'microsoft/phi-3-mini-3.8b', 
     name: 'Phi-3 Mini 3.8B', 
-    totalShards: 2,
-    vramPerShard: 2.0,
-    totalModelSize: 4.0,
-    description: 'Efficient small model from Microsoft'
+    totalShards: 32,
+    vramPerShard: 0.12,
+    totalModelSize: 3.8,
+    description: 'Efficient small model from Microsoft with 32 layers'
   },
   
-  // Medium models (4-8 shards)
+  // Medium models (typically 32 layers for 7-8B models)
   { 
     id: 'petals-team/StableBeluga2', 
     name: 'StableBeluga2 7B', 
-    totalShards: 4,
-    vramPerShard: 2.5,
-    totalModelSize: 8.0,
-    description: 'Popular 7B parameter model, distributed across 4 shards'
+    totalShards: 32,
+    vramPerShard: 0.25,
+    totalModelSize: 7.0,
+    description: 'Popular 7B parameter model with 32 transformer blocks'
   },
   { 
     id: 'meta-llama/Meta-Llama-3.1-8B', 
     name: 'LLaMA 3.1 8B', 
-    totalShards: 4,
-    vramPerShard: 3.0,
-    totalModelSize: 10.0,
-    description: 'Meta\'s efficient 8B model'
+    totalShards: 32,
+    vramPerShard: 0.28,
+    totalModelSize: 8.0,
+    description: 'Meta\'s efficient 8B model with 32 layers'
   },
   
-  // Large models (16-32 shards)
+  // Large models
   { 
     id: 'tiiuae/falcon-40b-instruct', 
     name: 'Falcon 40B Instruct', 
-    totalShards: 16,
-    vramPerShard: 3.0,
+    totalShards: 60,
+    vramPerShard: 0.7,
     totalModelSize: 40.0,
-    description: 'Large instruction-tuned model, 16 shards'
+    description: 'Large instruction-tuned model with 60 transformer blocks'
   },
   { 
     id: 'meta-llama/Llama-2-70b-chat-hf', 
     name: 'LLaMA 2 70B Chat', 
-    totalShards: 28,
-    vramPerShard: 3.5,
+    totalShards: 80,
+    vramPerShard: 0.9,
     totalModelSize: 70.0,
-    description: 'Very large chat model, requires network participation'
+    description: 'Very large chat model with 80 transformer layers'
   },
   { 
     id: 'bigscience/bloom', 
     name: 'BLOOM 176B', 
-    totalShards: 64,
-    vramPerShard: 3.0,
+    totalShards: 70,
+    vramPerShard: 2.5,
     totalModelSize: 176.0,
-    description: 'Massive multilingual model, 64 shards across network'
+    description: 'Massive multilingual model with 70 transformer blocks'
   },
   
   // Extreme scale models
   { 
     id: 'tiiuae/falcon-180b-chat', 
     name: 'Falcon 180B Chat', 
-    totalShards: 72,
-    vramPerShard: 3.0,
+    totalShards: 80,
+    vramPerShard: 2.3,
     totalModelSize: 180.0,
-    description: 'One of the largest open models, 72 shards'
+    description: 'One of the largest open models with 80 blocks'
   },
   { 
     id: 'meta-llama/Meta-Llama-3.1-405B', 
     name: 'LLaMA 3.1 405B', 
-    totalShards: 144,
-    vramPerShard: 3.5,
+    totalShards: 126,
+    vramPerShard: 3.2,
     totalModelSize: 405.0,
-    description: 'Ultra-large distributed model, 144 shards'
+    description: 'Ultra-large distributed model with 126 transformer blocks'
   },
 ];
 
@@ -101,6 +102,35 @@ function calculateHostableShards(gpuVramGB, vramPerShard) {
   if (!gpuVramGB || gpuVramGB <= 0) return 0;
   const usableVram = Math.max(0, gpuVramGB - 0.5);
   return Math.floor(usableVram / vramPerShard);
+}
+
+// Helper to calculate if a model can be hosted on CPU
+function canHostOnCpu(totalRAMGB, model) {
+  if (!totalRAMGB || totalRAMGB <= 0) return true; // Default to allowing if RAM unknown
+  
+  // Leave at least 2GB for system, use 70% of remaining RAM
+  const usableRAM = Math.max(0, (totalRAMGB - 2.0) * 0.7);
+  
+  // Model can be hosted if at least ONE block fits in available RAM
+  // This allows CPU to contribute even to large models by hosting a few blocks
+  return model.vramPerShard <= usableRAM;
+}
+
+// Helper to calculate how many CPU shards can be hosted
+function calculateCpuHostableShards(totalRAMGB, model) {
+  if (!totalRAMGB || totalRAMGB <= 0) return 0;
+  
+  // Match backend conservative limit: max 1GB or 50% of available RAM
+  const maxRamBudget = Math.min(1.0, (totalRAMGB - 2.0) * 0.5);
+  
+  // Reserve 0.5GB for Petals overhead
+  const ramForBlocks = Math.max(0.1, maxRamBudget - 0.5);
+  
+  // Calculate blocks with 100MB per block estimate
+  const hostableShards = Math.floor(ramForBlocks / 0.1);
+  
+  // Ensure at least 1, cap at 8, and don't exceed model total
+  return Math.max(1, Math.min(hostableShards, 8, model.totalShards));
 }
 
 // Helper to extract VRAM from GPU info string
@@ -628,8 +658,10 @@ function ShareGpuModal({ isOpen, onClose }) {
 
   // Get selected model info for display
   const selectedModelInfo = supportedModels.find(m => m.id === selectedModel);
-  const hostableShards = (selectedModelInfo && gpuVram !== null) 
-    ? calculateHostableShards(gpuVram, selectedModelInfo.vramPerShard)
+  const hostableShards = selectedModelInfo
+    ? (hasNvidiaGpu && gpuVram !== null)
+      ? calculateHostableShards(gpuVram, selectedModelInfo.vramPerShard)
+      : calculateCpuHostableShards(hardwareInfo?.total_memory, selectedModelInfo)
     : null;
 
   return (
@@ -815,7 +847,7 @@ function ShareGpuModal({ isOpen, onClose }) {
                 fontSize: '0.9em',
                 border: '1px solid hsl(var(--border))'
               }}>
-                <strong>Compute Mode:</strong> CPU-only (limited to small models and single shard)
+                <strong>Compute Mode:</strong> CPU-only (using {hardwareInfo?.total_memory || 'available'}GB RAM)
               </div>
             )}
 
@@ -830,10 +862,10 @@ function ShareGpuModal({ isOpen, onClose }) {
               >
                 {supportedModels.map(model => {
                   // For GPU: check VRAM capacity
-                  // For CPU: only allow smallest models (TinyLlama or Gemma 2B)
+                  // For CPU: check if model fits in available RAM
                   const canHost = hasNvidiaGpu 
                     ? (gpuVram !== null ? calculateHostableShards(gpuVram, model.vramPerShard) > 0 : true)
-                    : (model.totalShards === 1 && model.vramPerShard <= 2.0); // CPU: only single-shard small models
+                    : canHostOnCpu(hardwareInfo?.total_memory, model);
                   
                   return (
                     <option 
@@ -892,9 +924,9 @@ function ShareGpuModal({ isOpen, onClose }) {
                           )}
                         </div>
                       )}
-                      {!hasNvidiaGpu && selectedModelInfo.totalShards === 1 && selectedModelInfo.vramPerShard <= 2.0 && (
+                      {!hasNvidiaGpu && hostableShards !== null && hostableShards > 0 && (
                         <div className="alert-box warning" style={{ marginTop: '0.5rem', padding: '0.5rem', fontSize: '0.85em' }}>
-                          ⚠️ CPU mode: Limited to 1 shard with reduced performance
+                          ⚠️ CPU mode: Performance will be slower than GPU. Petals will auto-detect optimal block count based on available RAM.
                         </div>
                       )}
                     </div>
@@ -923,8 +955,7 @@ function ShareGpuModal({ isOpen, onClose }) {
                       <p style={{ margin: '0 0 0.5rem 0' }}>{selectedModelInfo.description}</p>
                       {hostableShards !== null && hostableShards > 0 && hostableShards < selectedModelInfo.totalShards && (
                         <p style={{ margin: 0, fontStyle: 'italic' }}>
-                          You'll be contributing a partial hosting ({Math.round((hostableShards / selectedModelInfo.totalShards) * 100)}% of model capacity). 
-                          The network combines contributions from multiple hosts to serve the full model.
+                          You'll be contributing ~{hostableShards} blocks. The network combines contributions from multiple hosts to serve the full {selectedModelInfo.totalShards}-block model.
                         </p>
                       )}
                     </div>
@@ -1137,8 +1168,12 @@ function ShareGpuModal({ isOpen, onClose }) {
     </p>
     {selectedModelInfo && hostableShards !== null && (
       <p style={{ margin: 0, color: '#1e8e3e', fontSize: '0.95em' }}>
-        Hosting capacity: ~{hostableShards} of {selectedModelInfo.totalShards} shards 
-        ({Math.round((hostableShards / selectedModelInfo.totalShards) * 100)}%)
+        Estimated hosting: ~{hostableShards} blocks (of {selectedModelInfo.totalShards} total)
+        {!hasNvidiaGpu && (
+          <span style={{ display: 'block', fontSize: '0.85em', marginTop: '0.25rem', color: '#666' }}>
+            Petals will determine actual blocks based on RAM
+          </span>
+        )}
       </p>
     )}
     
@@ -1182,8 +1217,12 @@ function ShareGpuModal({ isOpen, onClose }) {
 )}
                 {selectedModelInfo && hostableShards !== null && (
                   <p style={{ margin: 0, fontSize: '0.95em' }}>
-                    Hosting capacity: ~{hostableShards} of {selectedModelInfo.totalShards} shards 
-                    ({Math.round((hostableShards / selectedModelInfo.totalShards) * 100)}%)
+                    Estimated hosting: ~{hostableShards} blocks (of {selectedModelInfo.totalShards} total)
+                    {!hasNvidiaGpu && (
+                      <span style={{ display: 'block', fontSize: '0.85em', marginTop: '0.25rem', color: '#666' }}>
+                        Petals will determine actual blocks based on RAM
+                      </span>
+                    )}
                   </p>
                 )}
               </div>

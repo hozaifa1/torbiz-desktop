@@ -178,8 +178,40 @@ def main():
         
         # Add device specification if not default
         if args.device == "cpu":
-            server_args.extend(["--torch_dtype", "float32", "--num_blocks", "1"])
-            logger.warning("Running in CPU-only mode with minimal blocks. Performance will be limited.")
+            # Calculate optimal number of blocks based on available RAM with conservative limits
+            try:
+                import psutil
+                # Get available memory in GB
+                total_ram_gb = psutil.virtual_memory().total / (1024**3)
+                
+                # Conservative limit: max 1GB total, or 50% of available RAM
+                max_ram_budget = min(1.0, (total_ram_gb - 2.0) * 0.5)
+                
+                # Reserve 0.5GB for Petals overhead (cache, buffers, etc.)
+                overhead_gb = 0.5
+                ram_for_blocks = max(0.1, max_ram_budget - overhead_gb)
+                
+                logger.info("Total system RAM: %.2f GB", total_ram_gb)
+                logger.info("Max RAM budget: %.2f GB (conservative limit)", max_ram_budget)
+                logger.info("RAM for blocks after overhead: %.2f GB", ram_for_blocks)
+                
+                # Calculate blocks (100MB per block estimate)
+                block_size_gb = 0.1
+                num_blocks = max(1, int(ram_for_blocks / block_size_gb))
+                
+                # Absolute maximum cap for safety
+                num_blocks = min(num_blocks, 8)
+                
+                logger.info("Calculated blocks: %d (%.2f GB per block)", num_blocks, block_size_gb)
+                server_args.extend(["--torch_dtype", "float32", "--num_blocks", str(num_blocks)])
+                logger.info("Running in CPU-only mode with %d blocks (~%.2f GB RAM)", num_blocks, num_blocks * block_size_gb)
+            except ImportError:
+                # Fallback if psutil not available
+                logger.warning("psutil not available, using 1 block (install psutil for dynamic block calculation)")
+                server_args.extend(["--torch_dtype", "float32", "--num_blocks", "1"])
+            except Exception as e:
+                logger.warning("Failed to calculate optimal blocks: %s, using 1 block", e)
+                server_args.extend(["--torch_dtype", "float32", "--num_blocks", "1"])
         
         sys.argv = server_args
         

@@ -557,29 +557,38 @@ function ShareGpuModal({ isOpen, onClose }) {
       } catch (error) {
         console.error("[SHARE-GPU] Failed to stop Petals:", error);
         processStopSuccess = false;
-        setStatus('error-stop');
-        setMessage(`Failed to stop Petals process: ${error}. You may need to restart the app.`);
-        // Don't return - still try to deregister from backend
+        // Continue to try deregistration
       }
     }
 
     // Step 2: De-register from backend (even if process stop failed)
     const deregisterResult = await deregisterGpuNode(nodeToken);
     
-    if (deregisterResult.success) {
-      if (processStopSuccess) {
-        setStatus('idle');
-        setMessage('GPU sharing stopped successfully. Node announced offline.');
-      } else {
-        setStatus('error-stop');
-        setMessage('Process may still be running, but node de-registered. Please restart the app if issues persist.');
-      }
+    // Handle results
+    if (processStopSuccess && deregisterResult.success) {
+      // Perfect - everything worked
+      setStatus('idle');
+      setMessage('GPU sharing stopped successfully. Node announced offline.');
+      setNodeToken(null);
+      setActiveModelId(null);
+    } else if (processStopSuccess && !deregisterResult.success) {
+      // Process stopped but backend deregistration failed (backend bug)
+      setStatus('idle'); // Still set to idle since process is stopped
+      setMessage('⚠️ Petals stopped, but backend deregistration failed. Your node may still appear active on the network temporarily. It will auto-expire.');
+      setNodeToken(null); // Clear token since process is stopped
+      setActiveModelId(null);
+      console.warn('[SHARE-GPU] Backend deregistration failed (likely backend bug):', deregisterResult.message);
+    } else if (!processStopSuccess && deregisterResult.success) {
+      // Process failed to stop but backend thinks it's offline
+      setStatus('error-stop');
+      setMessage('⚠️ Backend updated, but Petals process may still be running. Please restart the app.');
       setNodeToken(null);
       setActiveModelId(null);
     } else {
+      // Both failed
       setStatus('error-stop');
-      setMessage(`Failed to de-register: ${deregisterResult.message}. Process ${processStopSuccess ? 'stopped' : 'may still be running'}.`);
-      // Don't clear nodeToken if deregistration failed - allow retry
+      setMessage(`Failed to stop sharing: ${deregisterResult.message}. Please restart the app.`);
+      // Don't clear nodeToken - allow retry
     }
   };
 

@@ -41,7 +41,7 @@ nix = { version = "0.27", features = ["signal"] }
 [profile.dev]
 opt-level = 0
 incremental = true
-codegen-units = 256
+codegen-units = 16  # Changed from 256 to prevent system overload
 
 # Release profile - optimized for size and controlled memory usage
 [profile.release]

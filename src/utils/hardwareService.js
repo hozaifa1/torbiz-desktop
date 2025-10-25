@@ -239,15 +239,38 @@ export async function deregisterGpuNode(nodeToken) {
   } catch (error) {
     console.error('Failed to de-register GPU node:', error);
     let errorMessage = 'Failed to de-register GPU node.';
-     if (error.response) {
-        const backendError = error.response.data;
-        if (typeof backendError === 'string') { errorMessage = backendError; }
-        else if (backendError?.error === "node_token is required for de-registration.") { errorMessage = "Node token was missing or invalid."; } // Specific error from docs [cite: 936]
-        else if (backendError && typeof backendError === 'object') { errorMessage = backendError.detail || backendError.error || backendError.message || JSON.stringify(backendError); }
-        else { errorMessage = `Server responded with status ${error.response.status}.`; }
-        if (error.response.status === 401 || error.response.status === 403) { errorMessage = 'Authentication failed. Please ensure you are logged in.'; }
-    } else if (error.request) { errorMessage = 'Could not connect to the server.'; }
-    else { errorMessage = `An unexpected error occurred: ${error.message}`; }
+    
+    if (error.response) {
+      const status = error.response.status;
+      const backendError = error.response.data;
+      
+      // Check for the specific backend bug (500 error with ValueError)
+      if (status === 500 && (
+        typeof backendError === 'string' && backendError.includes('needs to have a value for field')
+      )) {
+        errorMessage = 'Backend error (known bug). Node will auto-expire from network.';
+        console.warn('[DEREGISTER] Hit known backend bug - node.delete() before accessing models_served');
+      } else if (typeof backendError === 'string') {
+        errorMessage = backendError;
+      } else if (backendError?.error === "node_token is required for de-registration.") {
+        errorMessage = "Node token was missing or invalid.";
+      } else if (backendError && typeof backendError === 'object') {
+        errorMessage = backendError.detail || backendError.error || backendError.message || JSON.stringify(backendError);
+      } else {
+        errorMessage = `Server responded with status ${status}.`;
+      }
+      
+      if (status === 401 || status === 403) {
+        errorMessage = 'Authentication failed. Please ensure you are logged in.';
+      } else if (status === 404) {
+        errorMessage = 'Node not found. It may have already been de-registered.';
+      }
+    } else if (error.request) {
+      errorMessage = 'Could not connect to the server.';
+    } else {
+      errorMessage = `An unexpected error occurred: ${error.message}`;
+    }
+    
     return { success: false, message: errorMessage };
   }
 }

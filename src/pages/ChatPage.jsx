@@ -338,32 +338,34 @@ function ChatPage() {
     if (isTestingMode) {
       console.log('[DIRECT-MODE-TOGGLE] Turning OFF');
       setIsTestingMode(false);
+      setPetalsEnvStatus({ ready: false, needsSetup: false, platform: 'unknown', message: 'Direct Mode disabled' });
       setPetalsLogs(prev => [...prev, '🔌 Direct Mode disabled']);
       return;
     }
     
-    // Trying to turn ON - check environment first
+    // Trying to turn ON - check environment first (BEFORE opening modal)
     console.log('[DIRECT-MODE-TOGGLE] Checking environment...');
-    setShowSetupConfirmation(true);  // Open the setup modal
     
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       const isPetalsReady = await invoke('check_petals_inference_ready');
       
       if (isPetalsReady) {
-        // Ready! Just toggle ON
+        // Ready! Just toggle ON without opening modal
         console.log('[DIRECT-MODE-TOGGLE] Petals ready, enabling Direct Mode');
         setIsTestingMode(true);
+        setPetalsEnvStatus({ ready: true, needsSetup: false, platform: 'detected', message: 'Petals ready for inference' });
         setShowPetalsLogs(true);
         setPetalsLogs(['⚡ Direct Mode enabled - ready for inference']);
-        setShowSetupConfirmation(false);
       } else {
-        // Needs setup - modal stays open showing setup UI
-        console.log('[DIRECT-MODE-TOGGLE] Petals not ready, showing setup flow');
+        // Needs setup - NOW open modal
+        console.log('[DIRECT-MODE-TOGGLE] Petals not ready, showing setup modal');
+        setShowSetupConfirmation(true);
       }
     } catch (error) {
       console.error('[DIRECT-MODE-TOGGLE] Check failed:', error);
-      // Modal stays open, will show setup flow
+      // On error, show modal with setup option
+      setShowSetupConfirmation(true);
     }
   };
 
@@ -394,8 +396,9 @@ function ChatPage() {
         // Wait a moment for user to see success
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // Enable Direct Mode and close modal
+        // Enable Direct Mode and close modal - CRITICAL: Set petalsEnvStatus.ready = true
         setIsTestingMode(true);
+        setPetalsEnvStatus({ ready: true, needsSetup: false, platform: 'detected', message: 'Petals ready for inference' });
         setShowPetalsLogs(true);
         setShowSetupConfirmation(false);
         setPetalsLogs(['⚡ Direct Mode enabled - ready for inference']);
@@ -1041,7 +1044,11 @@ function ChatPage() {
             {!isSettingUpPetals && (
               <button 
                 className="modal-close-btn" 
-                onClick={() => setShowSetupConfirmation(false)}
+                onClick={() => {
+                  setShowSetupConfirmation(false);
+                  setIsSettingUpPetals(false);
+                  setPetalsLogs([]);
+                }}
                 aria-label="Close"
               >
                 ✕
@@ -1084,9 +1091,14 @@ function ChatPage() {
                 
                 <button 
                   className="modal-action-btn secondary"
-                  onClick={() => setShowSetupConfirmation(false)}
+                  onClick={() => {
+                    setShowSetupConfirmation(false);
+                    setIsSettingUpPetals(false);
+                    setPetalsLogs([]);
+                  }}
+                  disabled={isSettingUpPetals}
                 >
-                  Cancel
+                  {isSettingUpPetals ? 'Please wait...' : 'Cancel'}
                 </button>
               </>
             ) : (

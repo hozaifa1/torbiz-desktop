@@ -61,22 +61,22 @@ export async function streamInference(modelId, prompt, userId, onToken, onComple
     const decoder = new TextDecoder();
     let buffer = '';
     let tokenCount = 0;
+    
+    // Flag to track if the completion signal (data.done=true) was received
+    let streamFinishedBySignal = false; 
 
     console.log('[INFERENCE] Stream started, reading chunks...');
-
+    
     while (true) {
       const { done, value } = await reader.read();
-      
-      if (done) {
-        console.log('[INFERENCE] Stream completed naturally', { tokenCount });
-        break;
+
+      // 1. Process the incoming value first (even if done is true, it might contain the last chunk)
+      if (value) {
+        const chunk = decoder.decode(value, { stream: true });
+        buffer += chunk;
       }
-
-      // Decode the chunk
-      const chunk = decoder.decode(value, { stream: true });
-      buffer += chunk;
-
-      // Process complete lines (SSE format or newline-delimited JSON)
+      
+      // 2. Process complete lines (SSE format or newline-delimited JSON)
       const lines = buffer.split('\n');
       buffer = lines.pop() || ''; // Keep incomplete line in buffer
 
@@ -95,10 +95,13 @@ export async function streamInference(modelId, prompt, userId, onToken, onComple
           // Check for completion signal
           if (data.done === true || data.complete === true || data.finished === true) {
             console.log('[INFERENCE] Received completion signal', { tokenCount });
+            
+            // Set flag and call onComplete once
+            streamFinishedBySignal = true; 
             if (onComplete) {
               onComplete();
             }
-            return () => {}; // Return empty abort function since we're done
+            break; // Exit the inner loop immediately
           }
 
           // Extract token from various possible formats
@@ -106,6 +109,7 @@ export async function streamInference(modelId, prompt, userId, onToken, onComple
           
           if (token) {
             tokenCount++;
+            console.log(`[INFERENCE] First token? tokenCount=1, token='${token}'`); 
             if (onToken) {
               onToken(token);
             }
@@ -127,24 +131,50 @@ export async function streamInference(modelId, prompt, userId, onToken, onComple
           }
         }
       }
-    }
 
-    // Stream ended without explicit completion signal
-    console.log('[INFERENCE] Stream ended', { tokenCount });
-    if (onComplete) {
-      onComplete();
-    }
+      // Check the flag immediately after the inner loop
+      if (streamFinishedBySignal) {
+        break; // Exit the outer while (true) loop
+      }
+      
+      // 3. Check for natural stream end (MUST be after processing 'value')
+      if (done) {
+        console.log('[INFERENCE] Stream completed naturally', { tokenCount });
+        
+        // <<< ANTI-TRUNCATION FIX: Process any final content left in the buffer >>>
+        if (buffer.trim()) {
+            console.warn('[INFERENCE] Processing final leftover buffer as token:', buffer.substring(0, 50));
+            if (onToken) {
+                onToken(buffer);
+            }
+            tokenCount++;
+        }
+        
+        // Call onComplete only if the signal wasn't received in the last chunk
+        if (!streamFinishedBySignal && onComplete) {
+            onComplete();
+        }
+
+        break; // Exit the outer while (true) loop
+      }
+    } // End while (true) loop
+
+    // REMOVED redundant onComplete() call here. It is now handled inside the loop.
 
   } catch (error) {
     console.error('[INFERENCE] Stream error:', error);
     
     if (error.name === 'AbortError') {
       console.log('[INFERENCE] Stream aborted by user');
-      return () => {}; // Already aborted
-    }
-
-    if (onError) {
-      onError(error.message || 'Failed to connect to inference service');
+      // No need to call onError or onComplete for user abort
+    } else {
+      // Explicitly call onComplete/onError to clean up the UI state
+      if (onError) {
+        onError(error.message || 'Failed to connect to inference service');
+      } else if (onComplete) {
+         // Even if there was an error, ensure the UI is un-stuck
+         onComplete();
+      }
     }
   }
 

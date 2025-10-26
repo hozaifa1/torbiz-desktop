@@ -1,22 +1,9 @@
 #!/usr/bin/env python3
-"""
-Petals Direct Inference Script for Testing
-Connects to Petals network and runs inference using AutoDistributedModelForCausalLM
-
-This script works on:
-- Windows (via WSL)
-- macOS (native)
-- Linux (native)
-
-Requirements:
-- petals library: pip install git+https://github.com/bigscience-workshop/petals
-- transformers library (installed with petals)
-- torch (installed with petals)
-"""
 import sys
 import logging
 import argparse
 import json
+import torch
 
 # Configure logging
 logging.basicConfig(
@@ -210,56 +197,7 @@ def main():
         print(json.dumps(error_output), flush=True)
         sys.exit(1)
 
-
-# def stream_generate(model, tokenizer, inputs, max_new_tokens, temperature):
-#     """
-#     Generate tokens one at a time for streaming.
-#     Yields individual token strings.
-#     """
-#     import torch
-    
-#     input_ids = inputs["input_ids"]
-#     attention_mask = inputs.get("attention_mask")
-    
-#     for _ in range(max_new_tokens):
-#         # Get model predictions
-#         with torch.no_grad():
-#             outputs = model(
-#                 input_ids=input_ids,
-#                 attention_mask=attention_mask,
-#             )
-#             logits = outputs.logits
-        
-#         # Get next token (sample with temperature)
-#         next_token_logits = logits[:, -1, :] / temperature
-#         probs = torch.softmax(next_token_logits, dim=-1)
-#         next_token = torch.multinomial(probs, num_samples=1)
-        
-#         # Check for EOS token
-#         if next_token.item() == tokenizer.eos_token_id:
-#             break
-        
-#         # Decode the new token
-#         new_token_text = tokenizer.decode(next_token[0], skip_special_tokens=True)
-        
-#         # Only yield if there"s actual text
-#         if new_token_text.strip():
-#             yield new_token_text
-        
-#         # Append to input for next iteration
-#         input_ids = torch.cat([input_ids, next_token], dim=1)
-#         if attention_mask is not None:
-#             attention_mask = torch.cat([
-#                 attention_mask,
-#                 torch.ones((attention_mask.shape[0], 1), dtype=attention_mask.dtype)
-#             ], dim=1)
-
 def stream_generate(model, tokenizer, inputs, max_new_tokens, temperature):
-    """
-    Generate tokens one at a time for streaming.
-    Yields individual token strings.
-    """
-    import torch
     
     input_ids = inputs["input_ids"]
     attention_mask = inputs.get("attention_mask")

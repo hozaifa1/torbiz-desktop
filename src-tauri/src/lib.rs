@@ -1302,7 +1302,7 @@ async fn run_petals_inference(
         // Build the inference command - KEEP stderr to see errors, add timeout
         // Add -u flag to Python for unbuffered output
         let command = format!(
-            "source ~/.torbiz_venv/bin/activate && python3 -u {} --model-name '{}' --prompt '{}' --stream --timeout 30 2>&1",
+            "source ~/.torbiz_venv/bin/activate && python3 -u {} --model-name '{}' --prompt '{}' --stream --timeout 500 2>&1",
             wsl_script_path,
             model_name,
             escaped_prompt

@@ -825,7 +825,11 @@ function ChatPage() {
                 )}
               </div>
               <div className={`message ${msg.role === 'user' ? 'user' : msg.role === 'error' ? 'bot' : 'bot'}`}>
-                <p style={msg.role === 'error' ? { color: 'hsl(var(--destructive-foreground))' } : {}}>
+                <p style={{...(msg.role === 'error' ? { color: 'hsl(var(--destructive-foreground))' } : {}),
+                  // ADD these styles to enforce wrapping for long strings:
+                  wordBreak: 'break-word', 
+                  overflowWrap: 'break-word' 
+                }}>
                   {msg.content}
                 </p>
                 {msg.role === 'assistant' && msg.model && (
@@ -844,7 +848,7 @@ function ChatPage() {
                 <img src="/tauri.svg" alt="AI Assistant" />
               </div>
               <div className="message bot">
-                <p>
+                <p style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>
                   {currentStreamingMessage}
                   <span className="streaming-cursor">▊</span>
                 </p>

@@ -38,7 +38,7 @@ def main():
                         help="Sampling temperature")
     parser.add_argument("--stream", action="store_true",
                         help="Stream tokens one by one")
-    parser.add_argument("--timeout", type=int, default=30,
+    parser.add_argument("--timeout", type=int, default=500,
                         help="Timeout for connecting to Petals (seconds)")
     args = parser.parse_args()
     
@@ -211,6 +211,49 @@ def main():
         sys.exit(1)
 
 
+# def stream_generate(model, tokenizer, inputs, max_new_tokens, temperature):
+#     """
+#     Generate tokens one at a time for streaming.
+#     Yields individual token strings.
+#     """
+#     import torch
+    
+#     input_ids = inputs["input_ids"]
+#     attention_mask = inputs.get("attention_mask")
+    
+#     for _ in range(max_new_tokens):
+#         # Get model predictions
+#         with torch.no_grad():
+#             outputs = model(
+#                 input_ids=input_ids,
+#                 attention_mask=attention_mask,
+#             )
+#             logits = outputs.logits
+        
+#         # Get next token (sample with temperature)
+#         next_token_logits = logits[:, -1, :] / temperature
+#         probs = torch.softmax(next_token_logits, dim=-1)
+#         next_token = torch.multinomial(probs, num_samples=1)
+        
+#         # Check for EOS token
+#         if next_token.item() == tokenizer.eos_token_id:
+#             break
+        
+#         # Decode the new token
+#         new_token_text = tokenizer.decode(next_token[0], skip_special_tokens=True)
+        
+#         # Only yield if there"s actual text
+#         if new_token_text.strip():
+#             yield new_token_text
+        
+#         # Append to input for next iteration
+#         input_ids = torch.cat([input_ids, next_token], dim=1)
+#         if attention_mask is not None:
+#             attention_mask = torch.cat([
+#                 attention_mask,
+#                 torch.ones((attention_mask.shape[0], 1), dtype=attention_mask.dtype)
+#             ], dim=1)
+
 def stream_generate(model, tokenizer, inputs, max_new_tokens, temperature):
     """
     Generate tokens one at a time for streaming.
@@ -220,6 +263,10 @@ def stream_generate(model, tokenizer, inputs, max_new_tokens, temperature):
     
     input_ids = inputs["input_ids"]
     attention_mask = inputs.get("attention_mask")
+    
+    # Store the prompt's length and previous response length for diffing
+    prompt_len = input_ids.shape[1] 
+    previous_response_len = 0       
     
     for _ in range(max_new_tokens):
         # Get model predictions
@@ -239,13 +286,6 @@ def stream_generate(model, tokenizer, inputs, max_new_tokens, temperature):
         if next_token.item() == tokenizer.eos_token_id:
             break
         
-        # Decode the new token
-        new_token_text = tokenizer.decode(next_token[0], skip_special_tokens=True)
-        
-        # Only yield if there"s actual text
-        if new_token_text.strip():
-            yield new_token_text
-        
         # Append to input for next iteration
         input_ids = torch.cat([input_ids, next_token], dim=1)
         if attention_mask is not None:
@@ -253,8 +293,22 @@ def stream_generate(model, tokenizer, inputs, max_new_tokens, temperature):
                 attention_mask,
                 torch.ones((attention_mask.shape[0], 1), dtype=attention_mask.dtype)
             ], dim=1)
-
-
+        
+        # Decode the *entire* generated part (excluding the prompt)
+        full_output_ids = input_ids[0, prompt_len:]
+        
+        # Decode the whole sequence generated so far
+        full_response_text = tokenizer.decode(full_output_ids, skip_special_tokens=True)
+        
+        # Determine the *new* token text by taking the difference
+        # This correctly captures spaces and special characters
+        new_token_text = full_response_text[previous_response_len:]
+        previous_response_len = len(full_response_text)
+        
+        # Only yield if there's actual text
+        if new_token_text: 
+            yield new_token_text
+            
 if __name__ == "__main__":
     main()
 

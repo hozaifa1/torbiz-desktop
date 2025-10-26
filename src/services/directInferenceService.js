@@ -96,9 +96,18 @@ export async function runDirectInference(modelId, prompt, onToken, onComplete, o
 
     // Start inference (returns immediately now)
     try {
+      // Create a system prompt
+      const systemPrompt = `### System:
+You are a helpful AI assistant.
+
+### User:
+${prompt}
+
+### Assistant:
+`;
       await invoke('run_petals_inference', {
         modelName: modelId,
-        prompt: prompt,
+        prompt: systemPrompt,
       });
     } catch (invokeError) {
       console.error('[DIRECT-INFERENCE] Invoke error:', invokeError);

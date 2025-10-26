@@ -9,15 +9,15 @@ jobs:
   build-tauri:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v2
-      - uses: actions/setup-node@v2
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '18'
       - uses: dtolnay/rust-toolchain@stable
       - run: rustup target add aarch64-apple-darwin
       - run: npm install
       - run: npm run tauri build -- --target aarch64-apple-darwin
-      - uses: actions/upload-artifact@v2
+      - uses: actions/upload-artifact@v4
         with:
           name: torbiz-desktop-aarch64.dmg
           path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg

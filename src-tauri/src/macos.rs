@@ -1,16 +1,11 @@
 // src-tauri/src/macos.rs
 // macOS-specific setup and utilities
 
+#[cfg(target_os = "macos")]
 use std::process::Command;
-use serde::Serialize;
-use tauri::Emitter;
 
-#[derive(Debug, Serialize, Clone)]
-pub struct SetupProgress {
-    pub stage: String,
-    pub message: String,
-    pub progress: u8,
-}
+use tauri::Emitter;
+use crate::wsl::SetupProgress;
 
 #[cfg(target_os = "macos")]
 pub fn check_python3_installed() -> bool {
@@ -90,6 +85,7 @@ pub async fn setup_macos_environment(
 ) -> Result<String, String> {
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = window; // Suppress unused warning
         return Err("macOS setup is only for macOS devices.".to_string());
     }
 

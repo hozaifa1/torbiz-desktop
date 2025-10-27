@@ -3,6 +3,8 @@
 
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::process::Command;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

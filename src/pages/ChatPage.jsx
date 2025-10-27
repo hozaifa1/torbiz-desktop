@@ -385,13 +385,30 @@ function ChatPage() {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       
-      setPetalsLogs(prev => [...prev, '🔍 Checking WSL installation...']);
+      // Detect platform
+      const isMac = navigator.userAgent.includes('Mac');
+      const isWin = navigator.userAgent.includes('Windows');
       
-      // Setup WSL environment for client inference (minimal dependencies)
-      await invoke('setup_wsl_environment_client');
-      await invoke('mark_wsl_setup_complete');
+      if (isMac) {
+        setPetalsLogs(prev => [...prev, '🍎 Detected macOS - setting up native environment...']);
+        
+        // Setup macOS environment
+        await invoke('setup_macos_environment');
+        await invoke('mark_macos_setup_complete');
+      } else if (isWin) {
+        setPetalsLogs(prev => [...prev, '🔍 Checking WSL installation...']);
+        
+        // Setup WSL environment for client inference (minimal dependencies)
+        await invoke('setup_wsl_environment_client');
+        await invoke('mark_wsl_setup_complete');
+      } else {
+        setPetalsLogs(prev => [...prev, '🐧 Detected Linux - setting up environment...']);
+        // For Linux, we assume Python and pip are already available
+        setPetalsLogs(prev => [...prev, '⚠️ On Linux, please install Petals manually: pip install git+https://github.com/bigscience-workshop/petals']);
+        throw new Error('Linux setup not yet automated. Please install Petals manually.');
+      }
       
-      setPetalsLogs(prev => [...prev, '✅ WSL and Petals installed successfully!']);
+      setPetalsLogs(prev => [...prev, '✅ Environment and Petals installed successfully!']);
       setPetalsLogs(prev => [...prev, '🔍 Verifying installation...']);
       
       // Verify it's ready
@@ -417,7 +434,7 @@ function ChatPage() {
     } catch (error) {
       console.error('[DIRECT-MODE] Setup failed:', error);
       setPetalsLogs(prev => [...prev, `❌ Setup failed: ${error}`]);
-      setPetalsLogs(prev => [...prev, '💡 You can also use the Share GPU button to set up WSL']);
+      setPetalsLogs(prev => [...prev, '💡 You can also use the Share GPU button to set up the environment']);
     } finally {
       setIsSettingUpPetals(false);
     }
@@ -1099,12 +1116,15 @@ function ChatPage() {
                     Automatic installation of:
                   </p>
                   <ul style={{ margin: '0.5rem 0', paddingLeft: '1.5rem' }}>
-                    <li><strong>WSL</strong> (Windows Subsystem for Linux)</li>
+                    <li><strong>Platform setup</strong> (WSL on Windows, native on macOS/Linux)</li>
                     <li><strong>Petals library</strong> (~3GB download)</li>
-                    <li><strong>Additional packages</strong> (peft, accelerate)</li>
+                    <li><strong>Additional packages</strong> (dependencies)</li>
                   </ul>
                   <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em' }}>
                     ⏱️ First-time setup: 5-10 minutes
+                  </p>
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em', fontStyle: 'italic' }}>
+                    📝 macOS users: Homebrew must be installed first
                   </p>
                 </div>
                 
@@ -1132,7 +1152,7 @@ function ChatPage() {
                 <div className="alert-box info" style={{ marginBottom: '1rem' }}>
                   <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>🔧 Setting Up...</h4>
                   <p style={{ margin: 0, fontSize: '0.9em' }}>
-                    Installing WSL and Petals. This may take several minutes.
+                    Installing environment and Petals. This may take several minutes.
                     Please don't close this window.
                   </p>
                 </div>

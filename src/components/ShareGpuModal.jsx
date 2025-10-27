@@ -174,8 +174,10 @@ function ShareGpuModal({ isOpen, onClose }) {
   const [nodeToken, setNodeToken] = useState(null);
   const [activeModelId, setActiveModelId] = useState(null); // Track actively shared model
   const [isWindows, setIsWindows] = useState(false);
+  const [isMacOS, setIsMacOS] = useState(false);
   const [wslSetupProgress, setWslSetupProgress] = useState({ stage: '', message: '', progress: 0 });
   const [wslSetupComplete, setWslSetupComplete] = useState(false);
+  const [macosSetupComplete, setMacosSetupComplete] = useState(false);
   const [gpuVram, setGpuVram] = useState(null);
   const [hardwareInfo, setHardwareInfo] = useState(null);
   const [showShardInfo, setShowShardInfo] = useState(false);
@@ -262,11 +264,14 @@ function ShareGpuModal({ isOpen, onClose }) {
           const platformName = await osModule.platform();
           console.log('[PLATFORM] Detected platform:', platformName);
           setIsWindows(platformName === 'windows');
+          setIsMacOS(platformName === 'macos');
         } catch (error) {
           console.error('[PLATFORM] Failed to detect platform:', error);
           const isWindowsFallback = navigator.userAgent.includes('Windows');
-          console.log('[PLATFORM] Fallback detection, Windows:', isWindowsFallback);
+          const isMacOSFallback = navigator.userAgent.includes('Mac');
+          console.log('[PLATFORM] Fallback detection, Windows:', isWindowsFallback, 'macOS:', isMacOSFallback);
           setIsWindows(isWindowsFallback);
+          setIsMacOS(isMacOSFallback);
         }
       }
       
@@ -434,10 +439,47 @@ function ShareGpuModal({ isOpen, onClose }) {
     }
   };
 
+  const handleMacosSetup = async () => {
+    if (!isTauriEnvironment()) return;
+
+    setStatus('wsl-setup'); // Reuse the same status for progress display
+    setMessage('Setting up macOS environment for Petals...');
+    setWslSetupProgress({ stage: 'starting', message: 'Initializing...', progress: 0 });
+
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      const result = await invoke('setup_macos_environment');
+      console.log('[MACOS-SETUP] Setup completed:', result);
+      
+      await invoke('mark_macos_setup_complete');
+      setMacosSetupComplete(true);
+      
+      setStatus('wsl-ready'); // Reuse the same status
+      setMessage('macOS environment is ready! You can now start sharing your GPU.');
+      
+    } catch (error) {
+      console.error('[MACOS-SETUP] Setup failed:', error);
+      setStatus('wsl-error'); // Reuse the same status
+      
+      if (error.includes('Homebrew')) {
+        setMessage(`Homebrew is required. Please install it from https://brew.sh and try again. Error: ${error}`);
+      } else {
+        setMessage(`macOS setup failed: ${error}`);
+      }
+    }
+  };
+
   const handleShare = async () => {
     // Step 1: On Windows, ensure WSL is set up first
     if (isWindows && !wslSetupComplete) {
       await handleWslSetup();
+      return;
+    }
+
+    // Step 1: On macOS, ensure environment is set up first
+    if (isMacOS && !macosSetupComplete) {
+      await handleMacosSetup();
       return;
     }
 
@@ -677,7 +719,7 @@ function ShareGpuModal({ isOpen, onClose }) {
            isSharing ? 'GPU Sharing Active' : 'Share Your GPU'}
         </h2>
 
-        {/* WSL Setup Required */}
+        {/* WSL Setup Required (Windows) */}
         {isWindows && !wslSetupComplete && status === 'idle' && (
           <>
             {!hasNvidiaGpu && (
@@ -721,7 +763,43 @@ function ShareGpuModal({ isOpen, onClose }) {
           </>
         )}
 
-        {/* WSL Setup in Progress */}
+        {/* macOS Setup Required */}
+        {isMacOS && !macosSetupComplete && status === 'idle' && (
+          <>
+            <div className="alert-box info" style={{ textAlign: 'left' }}>
+              <h4>
+                <Download size={18} />
+                First-Time Setup Required
+              </h4>
+              <p style={{ marginBottom: '0.5rem' }}>
+                To run Petals on macOS, we need to install Python and Petals library. This is a one-time process that will take 5-10 minutes.
+              </p>
+              <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9em' }}>
+                <strong>Prerequisites:</strong>
+              </p>
+              <ul style={{ margin: '0 0 0.5rem 1.5rem', fontSize: '0.9em' }}>
+                <li>Homebrew must be installed (<a href="https://brew.sh" target="_blank" rel="noopener noreferrer" style={{ color: '#1a73e8' }}>install from brew.sh</a>)</li>
+                <li>Stable internet connection</li>
+              </ul>
+              <p style={{ margin: '0', fontSize: '0.9em', fontStyle: 'italic' }}>
+                ✨ On Apple Silicon, Petals automatically uses the GPU via Metal Performance Shaders
+              </p>
+            </div>
+            <button 
+              className="modal-action-btn primary" 
+              onClick={handleMacosSetup}
+              style={{ marginBottom: '0.5rem' }}
+            >
+              <Download size={16} style={{ marginRight: '8px' }} />
+              Start Setup
+            </button>
+            <button className="modal-action-btn secondary" onClick={handleClose}>
+              Cancel
+            </button>
+          </>
+        )}
+
+        {/* Setup in Progress (WSL or macOS) */}
         {status === 'wsl-setup' && (
           <div className="status-display">
             <Loader size={48} className="spinner" />
@@ -736,11 +814,15 @@ function ShareGpuModal({ isOpen, onClose }) {
                 <p style={{ margin: '0 0 0.5rem 0', fontWeight: '500' }}>
                   ⚠️ Please wait - do not close the app
                 </p>
+                {isWindows && (
+                  <>
+                    <p style={{ margin: '0 0 0.3rem 0' }}>
+                      • Terminal windows may open/close automatically - this is normal
+                    </p>
+                  </>
+                )}
                 <p style={{ margin: '0 0 0.3rem 0' }}>
-                  • Terminal windows may open/close automatically - this is normal
-                </p>
-                <p style={{ margin: '0 0 0.3rem 0' }}>
-                  • Downloading ~3GB of packages
+                  • Downloading packages (~3GB)
                 </p>
                 <p style={{ margin: '0' }}>
                   • Estimated time: 5-10 minutes
@@ -770,7 +852,7 @@ function ShareGpuModal({ isOpen, onClose }) {
         )}
 
         {/* Idle State - Model Selection */}
-        {(status === 'idle' || status === 'wsl-ready' || status === 'error-register') && (!isWindows || wslSetupComplete) && (
+        {(status === 'idle' || status === 'wsl-ready' || status === 'error-register') && (!isWindows || wslSetupComplete) && (!isMacOS || macosSetupComplete) && (
           <>
             {/* CPU/GPU Warning - Show if no NVIDIA GPU detected */}
             {!hasNvidiaGpu && (

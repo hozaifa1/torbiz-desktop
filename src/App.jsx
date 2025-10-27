@@ -13,6 +13,7 @@ import ProfilePage from './pages/ProfilePage';
 import SettingsPage from './pages/SettingsPage';
 import NotFoundPage from './pages/NotFoundPage';
 import { collectAndSendHardwareInfo } from './utils/hardwareService';
+import { checkForUpdates } from './utils/updateService';
 
 const queryClient = new QueryClient();
 const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID; //
@@ -21,6 +22,19 @@ const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID; //
 function AppRoutes() {
   const { user, loading } = useAuth(); // Get user object which now contains 'id'
   const location = useLocation();
+
+  // Check for updates on app startup (once per session)
+  useEffect(() => {
+    const updateCheckDone = sessionStorage.getItem('updateCheckDone');
+    
+    if (!updateCheckDone) {
+      checkForUpdates().then(() => {
+        sessionStorage.setItem('updateCheckDone', 'true');
+      }).catch(error => {
+        console.error('Update check failed:', error);
+      });
+    }
+  }, []); // Run once on mount
 
   // Send hardware info when user logs in (but only once per session)
   useEffect(() => {

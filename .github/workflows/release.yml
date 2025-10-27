@@ -2,22 +2,53 @@ name: Release
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*' # Trigger on version tags like v0.1.0, v0.1.1, etc.
+
+permissions:
+  contents: write # Required for creating releases
 
 jobs:
-  build-tauri:
-    runs-on: macos-latest
+  build-and-release:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: 'macos-latest'
+            args: '--target aarch64-apple-darwin'
+            target: 'aarch64-apple-darwin'
+          - platform: 'windows-latest'
+            args: '--target x86_64-pc-windows-msvc'
+            target: 'x86_64-pc-windows-msvc'
+
+    runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '18'
-      - uses: dtolnay/rust-toolchain@stable
-      - run: rustup target add aarch64-apple-darwin
-      - run: npm install
-      - run: npm run tauri build -- --target aarch64-apple-darwin
-      - uses: actions/upload-artifact@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build and create release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          name: torbiz-desktop-aarch64.dmg
-          path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Torbiz v__VERSION__'
+          releaseBody: 'See the assets to download and install this version.'
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+          includeUpdaterJson: true

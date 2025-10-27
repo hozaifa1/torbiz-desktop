@@ -1024,7 +1024,7 @@ function ChatPage() {
         </div>
 
         {/* Petals Setup/Inference Logs Panel (side panel, compact) */}
-        {showPetalsLogs && (
+        {showPetalsLogs && !showSetupConfirmation && (
           <div style={{
             position: 'fixed',
             bottom: '20px',

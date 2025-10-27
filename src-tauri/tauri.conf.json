@@ -48,5 +48,15 @@
       "py/run_petals_seeder.py",
       "py/run_petals_inference.py"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "endpoints": [
+        "https://github.com/torbiz-project/torbiz-desktop/releases/latest/download/latest.json"
+      ],
+      "dialog": false,
+      "pubkey": ""
+    }
   }
 }

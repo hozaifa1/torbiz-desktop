@@ -8,34 +8,86 @@ use tauri::Emitter;
 use crate::wsl::SetupProgress;
 
 #[cfg(target_os = "macos")]
+/// Find executable in standard macOS locations
+fn find_executable(name: &str, standard_paths: &[&str]) -> Option<String> {
+    // Try command name first (checks PATH)
+    if Command::new(name).arg("--version").output().is_ok() {
+        return Some(name.to_string());
+    }
+    
+    // Try standard locations
+    for path in standard_paths {
+        let full_path = format!("{}/{}", path, name);
+        if Command::new(&full_path).arg("--version").output().is_ok() {
+            println!("[MACOS] Found {} at {}", name, full_path);
+            return Some(full_path);
+        }
+    }
+    
+    None
+}
+
+#[cfg(target_os = "macos")]
 pub fn check_python3_installed() -> bool {
-    match Command::new("python3").arg("--version").output() {
-        Ok(output) => {
+    let python_paths = vec![
+        "python3",                      // Try PATH first
+        "/opt/homebrew/bin/python3",    // Apple Silicon Homebrew
+        "/usr/local/bin/python3",       // Intel Homebrew
+        "/usr/bin/python3",             // System Python
+    ];
+    
+    for python_cmd in python_paths {
+        if let Ok(output) = Command::new(python_cmd).arg("--version").output() {
             if output.status.success() {
                 let version_str = String::from_utf8_lossy(&output.stdout);
-                println!("[MACOS] Python version: {}", version_str.trim());
+                println!("[MACOS] Found Python at {}: {}", python_cmd, version_str.trim());
+                
+                // Check if Python 3.10 or later
                 if let Some(version) = version_str.split_whitespace().nth(1) {
                     if let Some(minor) = version.split('.').nth(1) {
                         if let Ok(minor_num) = minor.parse::<u32>() {
-                            return minor_num >= 10;
+                            if minor_num >= 10 {
+                                return true;
+                            }
                         }
                     }
                 }
-                true
-            } else {
-                false
+                return true; // Accept any Python 3.x if version parsing fails
             }
         }
-        Err(_) => false,
     }
+    
+    println!("[MACOS] Python 3 not found in any standard location");
+    false
 }
 
 #[cfg(target_os = "macos")]
 pub fn check_homebrew_installed() -> bool {
-    match Command::new("brew").arg("--version").output() {
-        Ok(output) => output.status.success(),
-        Err(_) => false,
+    // Try standard command first
+    if let Ok(output) = Command::new("brew").arg("--version").output() {
+        if output.status.success() {
+            return true;
+        }
     }
+    
+    // Try Apple Silicon location
+    if let Ok(output) = Command::new("/opt/homebrew/bin/brew").arg("--version").output() {
+        if output.status.success() {
+            println!("[MACOS] Found Homebrew at /opt/homebrew/bin/brew");
+            return true;
+        }
+    }
+    
+    // Try Intel Mac location
+    if let Ok(output) = Command::new("/usr/local/bin/brew").arg("--version").output() {
+        if output.status.success() {
+            println!("[MACOS] Found Homebrew at /usr/local/bin/brew");
+            return true;
+        }
+    }
+    
+    println!("[MACOS] Homebrew not found in any standard location");
+    false
 }
 
 #[cfg(target_os = "macos")]
@@ -61,7 +113,19 @@ pub fn check_petals_installed() -> bool {
 pub fn install_petals_macos() -> Result<(), String> {
     println!("[MACOS] Installing Petals...");
     
-    let output = Command::new("python3")
+    // Find python3 executable
+    let python_paths = vec![
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+    ];
+    
+    let python_cmd = find_executable("python3", &python_paths)
+        .ok_or("Python 3 not found in any standard location")?;
+    
+    println!("[MACOS] Using Python at: {}", python_cmd);
+    
+    let output = Command::new(&python_cmd)
         .arg("-m")
         .arg("pip")
         .arg("install")
@@ -103,7 +167,14 @@ pub async fn setup_macos_environment(
         
         if !check_homebrew_installed() {
             emit_progress("homebrew_missing", "Homebrew not found", 15);
-            return Err("Homebrew is required but not installed. Please install Homebrew from https://brew.sh and try again.".to_string());
+            return Err(format!(
+                "Homebrew is required but not found. Please install it from https://brew.sh\n\n\
+                We checked:\n\
+                - System PATH\n\
+                - /opt/homebrew/bin/brew (Apple Silicon)\n\
+                - /usr/local/bin/brew (Intel Mac)\n\n\
+                After installing Homebrew, you may need to restart the app."
+            ));
         }
         
         println!("[MACOS] Homebrew is installed");

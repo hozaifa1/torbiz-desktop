@@ -5,13 +5,14 @@ use std::sync::{Arc, Mutex};
 use std::process::{Child, Command, Stdio};
 use std::io::{BufRead, BufReader};
 use std::thread;
-use std::path::PathBuf;
 use serde_json::json;
 use tauri::{Manager, Emitter, path::BaseDirectory};
 use tauri_plugin_notification::NotificationExt;
 
 #[cfg(target_os = "windows")]
 use crate::wsl::{execute_wsl_command, copy_script_to_wsl};
+
+#[cfg(any(target_os = "windows", target_os = "linux", not(target_os = "macos")))]
 use crate::hardware::get_hardware_info;
 
 pub struct PetalsState {

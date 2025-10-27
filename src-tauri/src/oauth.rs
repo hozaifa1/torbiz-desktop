@@ -1,6 +1,8 @@
 // src-tauri/src/oauth.rs
 // OAuth authentication server
 
+use tauri::Emitter;
+
 #[tauri::command]
 pub async fn start_oauth_server(_app: tauri::AppHandle, window: tauri::Window) -> Result<u16, String> {
     const MIN_PORT: u16 = 8000;

@@ -1,10 +1,14 @@
 // src-tauri/src/wsl.rs
 // WSL (Windows Subsystem for Linux) setup and utilities
 
-use std::process::Command;
-use std::path::PathBuf;
 use serde::Serialize;
 use tauri::Emitter;
+
+#[cfg(target_os = "windows")]
+use std::process::Command;
+
+#[cfg(target_os = "windows")]
+use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Clone)]
 pub struct SetupProgress {
@@ -326,6 +330,7 @@ pub async fn setup_wsl_environment(
 ) -> Result<String, String> {
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = window; // Suppress unused warning
         return Err("WSL setup is only needed on Windows. Your system doesn't require it.".to_string());
     }
 
@@ -379,6 +384,7 @@ pub async fn setup_wsl_environment_client(
 ) -> Result<String, String> {
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = window; // Suppress unused warning
         return Err("WSL setup is only needed on Windows. Your system doesn't require it.".to_string());
     }
 

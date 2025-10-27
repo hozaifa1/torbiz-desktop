@@ -18,3 +18,5 @@ First Release: You'll need to manually run npm install after this implementation
 GitHub URL: I set it to torbiz-project/torbiz-desktop - update the URL in tauri.conf.json and updateService.js if your repo path is different
 Windows: Users get seamless automatic updates
 macOS: Users get semi-automatic (download + manual install) due to no code signing
+
+i have completed the github push and the commit is there and i can see it on github commits, but the github actions didn't start any action, like it used to before you edited  when it was only for the .dmg file...the GitHub actions didn't start or it isn't doing anything even after the commit....that's the problem....check your code to see if everything's fine....also check some errors on my terminal and tell me if i should concern myself with those or are they resolved already?

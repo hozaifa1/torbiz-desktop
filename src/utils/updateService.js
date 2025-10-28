@@ -4,6 +4,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { platform } from "@tauri-apps/plugin-os";
 import { open } from "@tauri-apps/plugin-shell";
 import { downloadDir } from "@tauri-apps/api/path";
+import { getVersion } from "@tauri-apps/api/app";
 
 /**
  * Check for updates and handle them based on the platform
@@ -79,8 +80,10 @@ async function handleMacOSUpdate() {
     const release = await response.json();
     const latestVersion = release.tag_name.replace("v", "");
     
-    // Get current version from package
-    const currentVersion = "0.1.0"; // This will be replaced during build
+    // Get current version from Tauri app
+    const currentVersion = await getVersion();
+    
+    console.log(`Current version: ${currentVersion}, Latest version: ${latestVersion}`);
     
     // Compare versions (simple string comparison for now)
     if (latestVersion > currentVersion) {

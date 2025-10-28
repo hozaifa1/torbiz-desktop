@@ -17,9 +17,13 @@ jobs:
           - platform: 'macos-latest'
             args: '--target aarch64-apple-darwin'
             target: 'aarch64-apple-darwin'
+            artifact_name: 'macos-build'
+            bundle_path: 'src-tauri/target/aarch64-apple-darwin/release/bundle'
           - platform: 'windows-latest'
             args: '--target x86_64-pc-windows-msvc'
             target: 'x86_64-pc-windows-msvc'
+            artifact_name: 'windows-build'
+            bundle_path: 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle'
 
     runs-on: ${{ matrix.platform }}
     steps:
@@ -57,3 +61,23 @@ jobs:
           prerelease: false
           args: ${{ matrix.args }}
           includeUpdaterJson: true
+
+      - name: Upload macOS Artifacts
+        if: matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            ${{ matrix.bundle_path }}/dmg/*.dmg
+            ${{ matrix.bundle_path }}/macos/*.app.tar.gz
+          if-no-files-found: warn
+
+      - name: Upload Windows Artifacts
+        if: matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            ${{ matrix.bundle_path }}/nsis/*.exe
+            ${{ matrix.bundle_path }}/msi/*.msi
+          if-no-files-found: warn

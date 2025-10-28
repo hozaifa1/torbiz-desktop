@@ -24,6 +24,8 @@ jobs:
             artifact_name: 'Torbiz-Windows'
 
     runs-on: ${{ matrix.platform }}
+    # Note: CPU target compatibility is configured via src-tauri/.cargo/config.toml
+    # This ensures Windows builds use x86-64 baseline for cross-CPU compatibility
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4

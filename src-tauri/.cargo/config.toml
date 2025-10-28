@@ -1,11 +1,9 @@
-[build]
-# Limit parallel compilation jobs to prevent memory overload
-jobs = 2
+# Cargo build configuration for cross-platform compatibility
 
-# Enable incremental compilation for faster dev builds
+# Windows: Use baseline x86-64 instructions for maximum compatibility
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-cpu=native"]
+rustflags = ["-C", "target-cpu=x86-64"]
 
-# Optimize for memory usage during compilation
-[env]
-CARGO_BUILD_JOBS = "2"
+# macOS: Use Apple M1 baseline (compatible with all Apple Silicon)
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "target-cpu=apple-m1"]

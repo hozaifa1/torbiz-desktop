@@ -6,6 +6,7 @@ use std::process::Command;
 
 #[cfg(target_os = "macos")]
 use tauri::Emitter;
+
 #[cfg(target_os = "macos")]
 use crate::wsl::SetupProgress;
 

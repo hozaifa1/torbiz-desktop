@@ -48,13 +48,19 @@
       "py/run_petals_seeder.py",
       "py/run_petals_inference.py",
       "py/run_local_inference.py"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "currentUser"
+      }
+    }
   },
   "plugins": {
     "updater": {
       "active": true,
       "endpoints": [
-        "https://github.com/torbiz-project/torbiz-desktop/releases/latest/download/latest.json"
+        "https://github.com/hozaifa1/torbiz-desktop/releases/latest/download/latest.json"
       ],
       "dialog": false,
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IHJzaWduIGVuY3J5cHRlZCBzZWNyZXQga2V5ClJXUlRZMEl5ckRraXZHSmVGcXYraWM4cmNKdXdPTEFFbnRsNWJ3VVhGeitpSWJudHF2OEFBQkFBQUFBQUFBQUFBQUlBQUFBQW5JUjRJWWRuM0xlM0w1aWs3UjdaZEdjbmZsRjZTQXFwMHg0QU5xTmVoNDhsVHprVnU4b25OOHpiaWYrbm5kNjBsd0VXL3dhM1pSYzRaMzk1RDdnckZaYmxDZmJVNlB5eXVWRnYxL1l1bTVZbTV4cWkrQlRwOHFNaUZReHlzc3F0VSsvMks3VmNsQ009Cg=="

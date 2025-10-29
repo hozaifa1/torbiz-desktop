@@ -23,17 +23,28 @@ function AppRoutes() {
   const { user, loading } = useAuth(); // Get user object which now contains 'id'
   const location = useLocation();
 
-  // Check for updates on app startup (once per session)
+  // Check for updates on app startup and periodically
   useEffect(() => {
-    const updateCheckDone = sessionStorage.getItem('updateCheckDone');
+    console.log('[APP] Setting up update checker...');
     
-    if (!updateCheckDone) {
-      checkForUpdates().then(() => {
-        sessionStorage.setItem('updateCheckDone', 'true');
-      }).catch(error => {
-        console.error('Update check failed:', error);
+    // Check immediately on mount
+    checkForUpdates().catch(error => {
+      console.error('[APP] Initial update check failed:', error);
+    });
+    
+    // Check every 4 hours for updates
+    const updateInterval = setInterval(() => {
+      console.log('[APP] Running periodic update check...');
+      checkForUpdates().catch(error => {
+        console.error('[APP] Periodic update check failed:', error);
       });
-    }
+    }, 4 * 60 * 60 * 1000); // 4 hours
+    
+    // Cleanup interval on unmount
+    return () => {
+      console.log('[APP] Cleaning up update checker');
+      clearInterval(updateInterval);
+    };
   }, []); // Run once on mount
 
   // Send hardware info when user logs in (but only once per session)

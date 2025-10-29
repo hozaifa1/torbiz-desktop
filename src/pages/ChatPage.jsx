@@ -253,9 +253,16 @@ function ChatPage() {
         setPetalsLogs([]); // Real logs will arrive via events
         setShowPetalsLogs(true);
         
+        // Prepare conversation history for context
+        const conversationHistory = messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }));
+        
         abortFn = await runDirectInference(
           selectedModel.id,
           trimmedInput,
+          conversationHistory,
           // onToken callback
           (token) => {
             setCurrentStreamingMessage(prev => prev + token);
@@ -893,6 +900,9 @@ function ChatPage() {
                   <p style={{ margin: 0, fontSize: '0.9em', marginBottom: '0.5rem' }}>
                     ⚡ <strong>Direct Petals Mode Active</strong> - Your messages connect directly to the Petals network, 
                     bypassing the backend server.
+                  </p>
+                  <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9, marginBottom: '0.5rem' }}>
+                    💡 <strong>Context Support:</strong> Conversation history is included for coherent multi-turn conversations.
                   </p>
                   <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9 }}>
                     ⚠️ <strong>Note:</strong> GGUF models are not compatible. Use models like TinyLlama, Llama-2, or other standard HuggingFace models.

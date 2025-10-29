@@ -9,12 +9,14 @@ import { isTauriEnvironment } from '../utils/tauriHelpers';
  * 
  * @param {string} modelId - The model ID to use
  * @param {string} prompt - User's prompt
+ * @param {Array} conversationHistory - Array of previous messages for context
  * @param {Function} onToken - Callback for each token
  * @param {Function} onComplete - Callback when done
  * @param {Function} onError - Callback for errors
+ * @param {Function} onLog - Callback for logs
  * @returns {Function} Abort function (not implemented for direct mode)
  */
-export async function runDirectInference(modelId, prompt, onToken, onComplete, onError, onLog) {
+export async function runDirectInference(modelId, prompt, conversationHistory = [], onToken, onComplete, onError, onLog) {
   if (!isTauriEnvironment()) {
     if (onError) {
       onError('Direct inference only works in desktop app');
@@ -96,8 +98,26 @@ export async function runDirectInference(modelId, prompt, onToken, onComplete, o
 
     // Start inference (returns immediately now)
     try {
-      // Create a system prompt
-      const systemPrompt = `### System:
+      // Build prompt with conversation context
+      let systemPrompt = '';
+      
+      if (conversationHistory.length > 0) {
+        // Include conversation history for context (last 6 messages = 3 exchanges)
+        systemPrompt = '### System:\nYou are a helpful AI assistant.\n\n';
+        
+        for (const msg of conversationHistory.slice(-6)) {
+          if (msg.role === 'user') {
+            systemPrompt += `### User:\n${msg.content}\n\n`;
+          } else if (msg.role === 'assistant') {
+            systemPrompt += `### Assistant:\n${msg.content}\n\n`;
+          }
+        }
+        
+        // Add current prompt
+        systemPrompt += `### User:\n${prompt}\n\n### Assistant:\n`;
+      } else {
+        // Simple format for first message
+        systemPrompt = `### System:
 You are a helpful AI assistant.
 
 ### User:
@@ -105,6 +125,8 @@ ${prompt}
 
 ### Assistant:
 `;
+      }
+      
       await invoke('run_petals_inference', {
         modelName: modelId,
         prompt: systemPrompt,

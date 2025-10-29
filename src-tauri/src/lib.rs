@@ -7,6 +7,8 @@ mod wsl;
 mod macos;
 mod petals;
 
+use tauri::Manager;
+
 use hardware::get_hardware_info;
 use oauth::start_oauth_server;
 use wsl::{setup_wsl_environment, setup_wsl_environment_client};
@@ -16,7 +18,7 @@ use petals::{
     is_petals_seeder_running, get_petals_seeder_info, 
     get_petals_seeder_logs, mark_wsl_setup_complete, 
     mark_macos_setup_complete, check_petals_inference_ready, 
-    run_petals_inference
+    run_petals_inference, run_local_inference
 };
 
 // ===== SIMPLE UTILITY COMMANDS =====
@@ -65,6 +67,7 @@ pub fn run() {
             get_petals_seeder_logs,
             check_petals_inference_ready,
             run_petals_inference,
+            run_local_inference,
         ])
         .setup(|_app| {
             #[cfg(debug_assertions)]

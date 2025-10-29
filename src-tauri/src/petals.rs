@@ -735,6 +735,200 @@ pub async fn check_petals_inference_ready() -> Result<bool, String> {
 }
 
 #[tauri::command]
+pub async fn run_local_inference(
+    model_name: String,
+    prompt: String,
+    conversation_history: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use crate::wsl::execute_wsl_command;
+        
+        println!("[LOCAL-INFERENCE] Running local inference in WSL...");
+        println!("[LOCAL-INFERENCE] Model: {}", model_name);
+        println!("[LOCAL-INFERENCE] Prompt length: {}", prompt.len());
+        
+        let script_path = app
+            .path()
+            .resolve("py/run_local_inference.py", BaseDirectory::Resource)
+            .map_err(|e| format!("Failed to resolve script path: {}", e))?;
+
+        if !script_path.exists() {
+            return Err(format!("Python script not found at: {}", script_path.display()));
+        }
+
+        println!("[LOCAL-INFERENCE] Reading script from: {}", script_path.display());
+        let script_content = std::fs::read_to_string(&script_path)
+            .map_err(|e| format!("Failed to read script: {}", e))?;
+        
+        let escaped_content = script_content.replace("'", "'\\''");
+        let wsl_script_path = "~/run_local_inference.py";
+        let write_command = format!("cat > {} << 'EOF'\n{}\nEOF", wsl_script_path, escaped_content);
+        
+        println!("[LOCAL-INFERENCE] Writing script to WSL...");
+        execute_wsl_command(&write_command)
+            .map_err(|e| format!("Failed to copy script to WSL: {}", e))?;
+        
+        execute_wsl_command(&format!("chmod +x {}", wsl_script_path))
+            .map_err(|e| format!("Failed to chmod script: {}", e))?;
+        
+        let escaped_prompt = prompt.replace("'", "'\\''");
+        let escaped_history = conversation_history.replace("'", "'\\''");
+        
+        let command = format!(
+            "source ~/.torbiz_venv/bin/activate && python3 -u {} --model-name '{}' --prompt '{}' --conversation-history '{}' --stream --max-tokens 512 2>&1",
+            wsl_script_path,
+            model_name,
+            escaped_prompt,
+            escaped_history
+        );
+
+        let mut cmd = Command::new("wsl");
+        cmd.arg("-e")
+            .arg("bash")
+            .arg("-c")
+            .arg(&command)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn inference process: {}", e))?;
+
+        let child_id = child.id();
+        println!("[LOCAL-INFERENCE] Spawned process with PID: {}", child_id);
+
+        if let Some(stdout) = child.stdout.take() {
+            let app_handle = app.clone();
+            thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines() {
+                    if let Ok(line) = line {
+                        let _ = app_handle.emit("local_inference_log", line);
+                    }
+                }
+            });
+        }
+
+        Ok("Local inference started".to_string())
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        println!("[LOCAL-INFERENCE] Running local inference on macOS...");
+        println!("[LOCAL-INFERENCE] Model: {}", model_name);
+        println!("[LOCAL-INFERENCE] Prompt length: {}", prompt.len());
+
+        let script_path = app
+            .path()
+            .resolve("py/run_local_inference.py", BaseDirectory::Resource)
+            .map_err(|e| format!("Failed to resolve resource path: {}", e))?;
+
+        if !script_path.exists() {
+            return Err(format!("Python script not found at: {}", script_path.display()));
+        }
+
+        println!("[LOCAL-INFERENCE] Running with script: {}", script_path.display());
+
+        let mut cmd = Command::new("python3");
+        cmd.arg(script_path.to_str().ok_or("Invalid script path")?)
+            .arg("--model-name")
+            .arg(&model_name)
+            .arg("--prompt")
+            .arg(&prompt)
+            .arg("--conversation-history")
+            .arg(&conversation_history)
+            .arg("--stream")
+            .arg("--max-tokens")
+            .arg("512")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn inference process: {}", e))?;
+
+        let child_id = child.id();
+        println!("[LOCAL-INFERENCE] Spawned process with PID: {}", child_id);
+
+        if let Some(stdout) = child.stdout.take() {
+            let app_handle = app.clone();
+            thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines() {
+                    if let Ok(line) = line {
+                        let _ = app_handle.emit("local_inference_log", line);
+                    }
+                }
+            });
+        }
+
+        Ok("Local inference started".to_string())
+    }
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        println!("[LOCAL-INFERENCE] Running local inference on Linux...");
+        println!("[LOCAL-INFERENCE] Model: {}", model_name);
+        println!("[LOCAL-INFERENCE] Prompt length: {}", prompt.len());
+
+        let script_path = app
+            .path()
+            .resolve("py/run_local_inference.py", BaseDirectory::Resource)
+            .map_err(|e| format!("Failed to resolve resource path: {}", e))?;
+
+        if !script_path.exists() {
+            return Err(format!("Python script not found at: {}", script_path.display()));
+        }
+
+        println!("[LOCAL-INFERENCE] Running with script: {}", script_path.display());
+
+        let mut cmd = Command::new("python3");
+        cmd.arg(script_path.to_str().ok_or("Invalid script path")?)
+            .arg("--model-name")
+            .arg(&model_name)
+            .arg("--prompt")
+            .arg(&prompt)
+            .arg("--conversation-history")
+            .arg(&conversation_history)
+            .arg("--stream")
+            .arg("--max-tokens")
+            .arg("512")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| format!("Failed to spawn inference process: {}", e))?;
+
+        let child_id = child.id();
+        println!("[LOCAL-INFERENCE] Spawned process with PID: {}", child_id);
+
+        if let Some(stdout) = child.stdout.take() {
+            let app_handle = app.clone();
+            thread::spawn(move || {
+                let reader = BufReader::new(stdout);
+                for line in reader.lines() {
+                    if let Ok(line) = line {
+                        let _ = app_handle.emit("local_inference_log", line);
+                    }
+                }
+            });
+        }
+
+        Ok("Local inference started".to_string())
+    }
+}
+
+#[tauri::command]
 pub async fn run_petals_inference(
     model_name: String,
     prompt: String,

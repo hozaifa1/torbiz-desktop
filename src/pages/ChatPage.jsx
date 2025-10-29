@@ -12,6 +12,7 @@ import ShareGpuModal from '../components/ShareGpuModal';
 import api from '../services/api';
 import { streamInference, createInference } from '../services/inferenceService';
 import { runDirectInference, checkPetalsEnvironment } from '../services/directInferenceService';
+import { runLocalInference } from '../services/localInferenceService';
 
 // --- Placeholder Data ---
 const chatHistory = [
@@ -45,6 +46,9 @@ function ChatPage() {
   const [showPetalsLogs, setShowPetalsLogs] = useState(false);
   const [showSetupConfirmation, setShowSetupConfirmation] = useState(false);
   const [isCheckingPetals, setIsCheckingPetals] = useState(false);
+  
+  // Local inference mode (NEW - bypasses Petals DHT)
+  const [isLocalMode, setIsLocalMode] = useState(false);
 
   // Message and streaming state
   const [messages, setMessages] = useState([]);
@@ -171,8 +175,8 @@ function ChatPage() {
       }
     }
 
-    // Only check user ID if NOT in testing mode (backend needs it, direct mode doesn't)
-    if (!isTestingMode && !user?.id) {
+    // Only check user ID if NOT in testing or local mode (backend needs it, direct modes don't)
+    if (!isTestingMode && !isLocalMode && !user?.id) {
       setStreamError('User session error. Please log in again.');
       return;
     }
@@ -180,7 +184,7 @@ function ChatPage() {
     console.log('[CHAT] Sending message:', { 
       model: selectedModel.id, 
       length: trimmedInput.length,
-      mode: isTestingMode ? 'DIRECT' : 'BACKEND'
+      mode: isLocalMode ? 'LOCAL' : (isTestingMode ? 'DIRECT-PETALS' : 'BACKEND')
     });
 
     // Clear input immediately for better UX
@@ -205,8 +209,44 @@ function ChatPage() {
     try {
       let abortFn;
       
-      // Choose between direct inference (testing mode) or backend inference
-      if (isTestingMode) {
+      // Choose between local inference, direct Petals inference, or backend inference
+      if (isLocalMode) {
+        console.log('[CHAT] Using LOCAL INFERENCE (bypass Petals, use HuggingFace directly)');
+        
+        // Clear old logs and show panel
+        setPetalsLogs([]); // Real logs will arrive via events
+        setShowPetalsLogs(true);
+        
+        // Prepare conversation history for context
+        const conversationHistory = messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }));
+        
+        abortFn = await runLocalInference(
+          selectedModel.id,
+          trimmedInput,
+          conversationHistory,
+          // onToken callback
+          (token) => {
+            setCurrentStreamingMessage(prev => prev + token);
+          },
+          // onComplete callback
+          () => {
+            console.log('[CHAT] Local inference completed');
+            handleStreamComplete();
+          },
+          // onError callback
+          (error) => {
+            console.error('[CHAT] Local inference error:', error);
+            handleStreamError(error);
+          },
+          // onLog callback - capture inference logs
+          (logMessage) => {
+            setPetalsLogs(prev => [...prev, logMessage]);
+          }
+        );
+      } else if (isTestingMode) {
         console.log('[CHAT] Using DIRECT PETALS INFERENCE (testing mode)');
         
         // Clear old logs and show panel
@@ -608,24 +648,55 @@ function ChatPage() {
 
           {/* Header Actions */}
           <div className="header-actions">
+            {/* Local Mode Toggle - NEW: Uses HuggingFace transformers directly */}
+            <button 
+              className={`gpu-share-btn ${isLocalMode ? 'active' : ''}`}
+              onClick={() => {
+                // Turn off other modes
+                if (!isLocalMode) {
+                  setIsTestingMode(false);
+                  setPetalsLogs(['🚀 Local Mode - Using HuggingFace transformers directly']);
+                  setShowPetalsLogs(true);
+                }
+                setIsLocalMode(!isLocalMode);
+              }}
+              style={{
+                backgroundColor: isLocalMode ? '#10b981' : 'hsl(var(--secondary))',
+                color: isLocalMode ? 'white' : 'hsl(var(--foreground))',
+                border: isLocalMode ? 'none' : '1px solid hsl(var(--border))',
+              }}
+              title={
+                isLocalMode 
+                  ? 'Local Mode Active - Bypasses Petals, uses local HuggingFace model' 
+                  : 'Enable Local Mode (TEST) - Uses TinyLlama directly, bypasses Petals DHT'
+              }
+            >
+              <span style={{ fontSize: '1.2em' }}>🧪</span>
+              <span>
+                {isLocalMode ? 'Local Mode: ON' : 'Local Mode (TEST)'}
+              </span>
+            </button>
+            
             {/* Direct Mode Toggle - Always available, checks on click */}
             <button 
               className={`gpu-share-btn ${isTestingMode ? 'active' : ''}`}
               onClick={handleDirectModeToggle}
-              disabled={isCheckingPetals}
+              disabled={isCheckingPetals || isLocalMode}
               style={{
                 backgroundColor: isTestingMode ? 'hsl(var(--primary))' : 'hsl(var(--primary) / 0.15)',
                 color: isTestingMode ? 'hsl(var(--primary-foreground))' : 'hsl(var(--primary))',
                 border: isTestingMode ? 'none' : '1px solid hsl(var(--primary) / 0.3)',
-                opacity: isCheckingPetals ? 0.7 : 1,
-                cursor: isCheckingPetals ? 'wait' : 'pointer',
+                opacity: (isCheckingPetals || isLocalMode) ? 0.5 : 1,
+                cursor: (isCheckingPetals || isLocalMode) ? 'not-allowed' : 'pointer',
               }}
               title={
-                isCheckingPetals
-                  ? 'Checking environment...'
-                  : isTestingMode 
-                    ? 'Direct Mode Active - Click to disable' 
-                    : 'Connect directly to Petals network - Click to enable'
+                isLocalMode
+                  ? 'Direct Mode disabled (Local Mode active)'
+                  : isCheckingPetals
+                    ? 'Checking environment...'
+                    : isTestingMode 
+                      ? 'Direct Mode Active - Click to disable' 
+                      : 'Connect directly to Petals network - Click to enable'
               }
             >
               {isCheckingPetals ? (
@@ -806,6 +877,17 @@ function ChatPage() {
                 Powered by decentralized GPU network · 
                 {selectedModel ? ` Using ${selectedModel.name}` : ' Select a model to begin'}
               </p>
+              {isLocalMode && (
+                <div className="alert-box info" style={{ maxWidth: '600px', marginTop: '1rem', backgroundColor: '#d1fae5', border: '2px solid #10b981' }}>
+                  <p style={{ margin: 0, fontSize: '0.9em', marginBottom: '0.5rem' }}>
+                    🧪 <strong>Local Mode Active (TEST)</strong> - Using TinyLlama directly via HuggingFace transformers. 
+                    Bypasses Petals DHT entirely. First inference may take time as model downloads.
+                  </p>
+                  <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9 }}>
+                    💡 <strong>Context Support:</strong> Conversation history is sent with each message for better coherence.
+                  </p>
+                </div>
+              )}
               {isTestingMode && petalsEnvStatus.ready && (
                 <div className="alert-box info" style={{ maxWidth: '600px', marginTop: '1rem' }}>
                   <p style={{ margin: 0, fontSize: '0.9em', marginBottom: '0.5rem' }}>
@@ -988,7 +1070,11 @@ function ChatPage() {
             )}
           </div>
           <div className="chat-input-footer">
-            {isTestingMode ? (
+            {isLocalMode ? (
+              <span style={{ color: '#10b981' }}>
+                🧪 Local Mode (TEST) - Using HuggingFace transformers directly
+              </span>
+            ) : isTestingMode ? (
               <span style={{ color: 'hsl(var(--primary))' }}>
                 ⚡ Direct Petals Mode - Bypassing backend
               </span>
@@ -1003,7 +1089,7 @@ function ChatPage() {
                 · {streamError}
               </span>
             )}
-            {(isTestingMode || petalsLogs.length > 0) && (
+            {(isLocalMode || isTestingMode || petalsLogs.length > 0) && (
               <button
                 onClick={() => setShowPetalsLogs(!showPetalsLogs)}
                 style={{
@@ -1017,7 +1103,7 @@ function ChatPage() {
                   color: 'hsl(var(--foreground))',
                 }}
               >
-                {showPetalsLogs ? '▼' : '▶'} Petals Logs {petalsLogs.length > 0 && `(${petalsLogs.length})`}
+                {showPetalsLogs ? '▼' : '▶'} {isLocalMode ? 'Local Logs' : 'Petals Logs'} {petalsLogs.length > 0 && `(${petalsLogs.length})`}
               </button>
             )}
           </div>
@@ -1041,7 +1127,7 @@ function ChatPage() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', position: 'sticky', top: 0, backgroundColor: 'hsl(var(--card))', paddingBottom: '0.5rem', borderBottom: '1px solid hsl(var(--border))' }}>
               <h4 style={{ margin: 0, fontSize: '0.85rem', color: 'hsl(var(--foreground))' }}>
-                🔧 Petals Logs
+                {isLocalMode ? '🧪 Local Inference Logs' : '🔧 Petals Logs'}
               </h4>
               <button
                 onClick={() => setShowPetalsLogs(false)}

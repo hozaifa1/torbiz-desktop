@@ -254,17 +254,16 @@ pub async fn start_petals_seeder(
 
         println!("[PETALS] Starting seeder with script: {}", script_path.display());
 
-        let device = "cpu";
-        println!("[PETALS] Device: {} (Petals will auto-detect MPS on Apple Silicon)", device);
+        // On macOS, let Petals auto-detect the best device (Metal GPU on Apple Silicon, CPU fallback)
+        // Don't force --device cpu, let Petals decide
+        println!("[PETALS] Letting Petals auto-detect device (Metal GPU on Apple Silicon, or CPU)");
 
         let mut cmd = Command::new("python3");
         cmd.arg(script_path.to_str().ok_or("Invalid script path")?)
             .arg("--model-name")
             .arg(&model_name)
             .arg("--node-token")
-            .arg(&node_token)
-            .arg("--device")
-            .arg(device);
+            .arg(&node_token);
 
         if let Some(token) = hf_token {
             cmd.arg("--hf-token").arg(&token);
@@ -331,6 +330,37 @@ pub async fn start_petals_seeder(
                         }
                         if is_success {
                             let _ = app_handle.emit("petals_success", "Model loaded successfully");
+                        }
+                    }
+                }
+            });
+        }
+        
+        // CRITICAL: Also capture stderr for error messages on macOS
+        if let Some(stderr) = child.stderr.take() {
+            let logs = state.seeder_logs.clone();
+            let app_handle = app.clone();
+            thread::spawn(move || {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines() {
+                    if let Ok(line) = line {
+                        println!("[PETALS-ERR-MACOS] {}", line);
+                        
+                        // Emit all stderr output to UI for visibility
+                        let _ = app_handle.emit("petals_log", format!("[STDERR] {}", line));
+                        
+                        // Store in logs
+                        {
+                            let mut logs_guard = logs.lock().unwrap();
+                            logs_guard.push(format!("[STDERR] {}", line));
+                            if logs_guard.len() > 200 {
+                                logs_guard.remove(0);
+                            }
+                        }
+                        
+                        // Detect critical errors
+                        if line.contains("Error") || line.contains("ERROR") || line.contains("Failed") || line.contains("Traceback") {
+                            let _ = app_handle.emit("petals_error", format!("macOS Error: {}", line));
                         }
                     }
                 }

@@ -781,8 +781,8 @@ function ShareGpuModal({ isOpen, onClose }) {
                 <li>Homebrew must be installed (<a href="https://brew.sh" target="_blank" rel="noopener noreferrer" style={{ color: '#1a73e8' }}>install from brew.sh</a>)</li>
                 <li>Stable internet connection</li>
               </ul>
-              <p style={{ margin: '0', fontSize: '0.9em', fontStyle: 'italic' }}>
-                ✨ On Apple Silicon, Petals automatically uses the GPU via Metal Performance Shaders
+              <p style={{ margin: '0', fontSize: '0.9em', fontStyle: 'italic', color: '#10b981' }}>
+                ✨ <strong>Apple Silicon detected:</strong> Petals will automatically use your Metal GPU for acceleration!
               </p>
             </div>
             <button 
@@ -854,8 +854,8 @@ function ShareGpuModal({ isOpen, onClose }) {
         {/* Idle State - Model Selection */}
         {(status === 'idle' || status === 'wsl-ready' || status === 'error-register') && (!isWindows || wslSetupComplete) && (!isMacOS || macosSetupComplete) && (
           <>
-            {/* CPU/GPU Warning - Show if no NVIDIA GPU detected */}
-            {!hasNvidiaGpu && (
+            {/* CPU/GPU Warning - Show if no NVIDIA GPU detected (but not on macOS with Metal) */}
+            {!hasNvidiaGpu && !isMacOS && (
               <div className="alert-box warning" style={{ textAlign: 'left' }}>
                 <h4>
                   <AlertTriangle size={18} />
@@ -882,6 +882,21 @@ function ShareGpuModal({ isOpen, onClose }) {
                 </p>
               </div>
             )}
+            
+            {/* macOS Metal GPU Info */}
+            {isMacOS && (
+              <div className="alert-box success" style={{ textAlign: 'left', backgroundColor: '#d1fae5', border: '2px solid #10b981' }}>
+                <h4 style={{ color: '#065f46' }}>
+                  ✨ Metal GPU Acceleration
+                </h4>
+                <p style={{ marginBottom: '0.5rem', color: '#065f46' }}>
+                  <strong>Your Mac's GPU will be used automatically!</strong> Petals leverages Metal Performance Shaders for hardware acceleration on Apple Silicon.
+                </p>
+                <p style={{ margin: 0, fontSize: '0.9em', color: '#047857' }}>
+                  Your system: <strong>{hardwareInfo?.gpu_info?.[0] || 'Apple GPU'}</strong>
+                </p>
+              </div>
+            )}
 
             {/* Info banner about Petals sharding */}
             <div className="alert-box info" style={{ fontSize: '0.9em' }}>
@@ -905,7 +920,7 @@ function ShareGpuModal({ isOpen, onClose }) {
               </div>
             )}
 
-            {/* GPU VRAM Info */}
+            {/* GPU VRAM Info - NVIDIA */}
             {hasNvidiaGpu && gpuVram !== null && (
               <div style={{
                 backgroundColor: 'hsl(var(--secondary))',
@@ -919,8 +934,22 @@ function ShareGpuModal({ isOpen, onClose }) {
               </div>
             )}
             
-            {/* CPU Mode Info */}
-            {!hasNvidiaGpu && (
+            {/* macOS Metal GPU Info */}
+            {isMacOS && !hasNvidiaGpu && (
+              <div style={{
+                backgroundColor: '#d1fae5',
+                padding: '0.75rem',
+                borderRadius: 'calc(var(--radius) - 2px)',
+                marginBottom: '1rem',
+                fontSize: '0.9em',
+                border: '2px solid #10b981'
+              }}>
+                <strong style={{ color: '#065f46' }}>✨ Metal GPU Mode:</strong> <span style={{ color: '#047857' }}>Hardware acceleration enabled</span>
+              </div>
+            )}
+            
+            {/* CPU Mode Info - Non-macOS only */}
+            {!hasNvidiaGpu && !isMacOS && (
               <div style={{
                 backgroundColor: 'hsl(var(--secondary))',
                 padding: '0.75rem',

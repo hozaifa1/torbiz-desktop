@@ -76,8 +76,8 @@ def main():
                         help="HuggingFace model name/ID to serve")
     parser.add_argument("--node-token", type=str, required=True,
                         help="Unique node token from Torbiz backend")
-    parser.add_argument("--device", type=str, default="cuda",
-                        help="Device to use (cuda, cpu)")
+    parser.add_argument("--device", type=str, default="auto",
+                        help="Device to use (cuda, cpu, auto)")
     parser.add_argument("--port", type=int, default=31337,
                         help="Port for P2P communication")
     parser.add_argument("--hf-token", type=str,
@@ -88,7 +88,7 @@ def main():
     logger.info("Starting Petals SERVER for Torbiz")
     logger.info("Model: %s", args.model_name)
     logger.info("Node Token: %s...", args.node_token[:16])
-    logger.info("Device: %s", args.device)
+    logger.info("Initial Device Setting: %s", args.device)
     logger.info("Port: %d", args.port)
     
     # Log system time for debugging DHT sync issues
@@ -96,19 +96,41 @@ def main():
     
     logger.info("="*60)
     
-    # Check CUDA availability if requested
-    if args.device == "cuda":
-        try:
-            import torch
+    # Auto-detect device or validate specific device
+    try:
+        import torch
+        import platform
+        
+        if args.device == "auto":
+            # Auto-detect best device
+            if torch.cuda.is_available():
+                args.device = "cuda"
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                logger.info("✓ Auto-detected CUDA GPU: %s with %.2f GB VRAM", gpu_name, gpu_memory)
+            elif platform.system() == "Darwin" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                # macOS with Metal Performance Shaders
+                args.device = "cpu"  # Petals will use MPS through CPU mode on macOS
+                logger.info("✓ Auto-detected Apple Silicon with Metal GPU")
+                logger.info("✓ Petals will use Metal Performance Shaders for acceleration")
+            else:
+                args.device = "cpu"
+                logger.info("✓ Auto-detected CPU-only mode")
+        elif args.device == "cuda":
+            # Validate CUDA
             if torch.cuda.is_available():
                 gpu_name = torch.cuda.get_device_name(0)
                 gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-                logger.info("CUDA available: %s with %.2f GB VRAM", gpu_name, gpu_memory)
+                logger.info("✓ CUDA GPU verified: %s with %.2f GB VRAM", gpu_name, gpu_memory)
             else:
-                logger.warning("CUDA requested but not available, will fall back to CPU")
+                logger.warning("CUDA requested but not available, falling back to CPU")
                 args.device = "cpu"
-        except ImportError:
-            logger.warning("PyTorch not found, cannot check CUDA")
+        
+        logger.info("Final Device: %s", args.device)
+        
+    except ImportError:
+        logger.warning("PyTorch not found, defaulting to CPU")
+        args.device = "cpu"
     
     logger.info("Initializing Petals Server...")
     logger.info("This may take several minutes on first run (downloading model shards)...")

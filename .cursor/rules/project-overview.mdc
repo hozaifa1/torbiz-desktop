@@ -26,6 +26,9 @@ No need to do cargo check or cargo build or cargo run or npm run dev or any othe
 Always use "..."(double quotes) for string, especially in python (.py) files and never use '...'(single quotes).
 The GPU sharing from NVIDIA GPU is working perfectly well. So YOU MUST NOT break it, or make any changes to it.
 
+Before beginning any change on my existing code, run the following command in the root dir:
+git pull origin main
+
 At the end of any change you make to my existing code, you must run the following command in the root directory:
 git add .
 git commit -m "Your commit message"

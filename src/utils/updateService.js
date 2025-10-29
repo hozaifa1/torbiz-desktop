@@ -69,7 +69,7 @@ async function handleMacOSUpdate() {
   try {
     // Check GitHub API for latest release
     const response = await fetch(
-      "https://api.github.com/repos/torbiz-project/torbiz-desktop/releases/latest"
+      "https://api.github.com/repos/hozaifa1/torbiz-desktop/releases/latest"
     );
     
     if (!response.ok) {
@@ -158,7 +158,7 @@ async function handleMacOSUpdate() {
             }
           ).then(async (openGitHub) => {
             if (openGitHub) {
-              await open("https://github.com/torbiz-project/torbiz-desktop/releases/latest");
+              await open("https://github.com/hozaifa1/torbiz-desktop/releases/latest");
             }
           });
         }

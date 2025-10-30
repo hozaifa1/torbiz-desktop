@@ -24,6 +24,11 @@ pub struct PetalsState {
     pub seeder_logs: Arc<Mutex<Vec<String>>>,
 }
 
+// NEW: State for managing the inference process
+pub struct InferenceState {
+    pub process: Arc<Mutex<Option<Child>>>,
+}
+
 impl PetalsState {
     pub fn new() -> Self {
         Self {
@@ -33,6 +38,14 @@ impl PetalsState {
             wsl_setup_complete: Arc::new(Mutex::new(false)),
             macos_setup_complete: Arc::new(Mutex::new(false)),
             seeder_logs: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+}
+
+impl InferenceState {
+    pub fn new() -> Self {
+        Self {
+            process: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -958,12 +971,49 @@ pub async fn run_local_inference(
     }
 }
 
+// NEW: Command to stop a running inference process
+#[tauri::command]
+pub async fn stop_petals_inference(
+    state: tauri::State<'_, InferenceState>,
+) -> Result<String, String> {
+    let mut process_guard = state.process.lock().unwrap();
+    if let Some(mut child) = process_guard.take() { // .take() removes the value, leaving None
+        println!("[INFERENCE] Stopping inference process with PID: {}", child.id());
+        
+        match child.kill() {
+            Ok(_) => {
+                child.wait().ok(); // Clean up zombie process to prevent it from becoming a zombie
+                println!("[INFERENCE] Process stopped successfully.");
+                Ok("Inference process stopped.".to_string())
+            }
+            Err(e) => {
+                eprintln!("[INFERENCE] Failed to kill process: {}", e);
+                Err(format!("Failed to stop inference process: {}", e))
+            }
+        }
+    } else {
+        println!("[INFERENCE] No inference process was running to stop.");
+        Ok("No inference process was running.".to_string())
+    }
+}
+
 #[tauri::command]
 pub async fn run_petals_inference(
     model_name: String,
     prompt: String,
+    conversation_history: String,
     app: tauri::AppHandle,
+    state: tauri::State<'_, InferenceState>,
 ) -> Result<String, String> {
+    // Stop any previously running inference process
+    {
+        let mut process_guard = state.process.lock().unwrap();
+        if let Some(mut child) = process_guard.take() {
+            println!("[INFERENCE] Stopping previous inference process with PID: {}", child.id());
+            child.kill().ok();
+            child.wait().ok();
+        }
+    }
     #[cfg(target_os = "macos")]
     {
         println!("[INFERENCE] Running direct Petals inference on macOS...");
@@ -987,6 +1037,8 @@ pub async fn run_petals_inference(
             .arg(&model_name)
             .arg("--prompt")
             .arg(&prompt)
+            .arg("--conversation-history")
+            .arg(&conversation_history)
             .arg("--stream")
             .arg("--timeout")
             .arg("500")
@@ -1011,6 +1063,10 @@ pub async fn run_petals_inference(
                 }
             });
         }
+
+        // Store the new child process
+        let mut process_guard = state.process.lock().unwrap();
+        *process_guard = Some(child);
 
         Ok("Inference started".to_string())
     }
@@ -1050,6 +1106,7 @@ pub async fn run_petals_inference(
             .map_err(|e| format!("Failed to chmod script: {}", e))?;
         
         let escaped_prompt = prompt.replace("'", "'\\''");
+        let escaped_history = conversation_history.replace("'", "'\\''");
         
         println!("[INFERENCE] Checking if venv exists...");
         match execute_wsl_command("test -d ~/.torbiz_venv && echo 'exists' || echo 'missing'") {
@@ -1058,10 +1115,11 @@ pub async fn run_petals_inference(
         }
         
         let command = format!(
-            "source ~/.torbiz_venv/bin/activate && python3 -u {} --model-name '{}' --prompt '{}' --stream --timeout 500 2>&1",
+            "source ~/.torbiz_venv/bin/activate && python3 -u {} --model-name '{}' --prompt '{}' --conversation-history '{}' --stream --timeout 500 2>&1",
             wsl_script_path,
             model_name,
-            escaped_prompt
+            escaped_prompt,
+            escaped_history
         );
 
         let mut cmd = Command::new("wsl");
@@ -1098,6 +1156,10 @@ pub async fn run_petals_inference(
             });
         }
 
+        // Store the new child process
+        let mut process_guard = state.process.lock().unwrap();
+        *process_guard = Some(child);
+
         Ok("Inference started".to_string())
     }
 
@@ -1124,6 +1186,8 @@ pub async fn run_petals_inference(
             .arg(&model_name)
             .arg("--prompt")
             .arg(&prompt)
+            .arg("--conversation-history")
+            .arg(&conversation_history)
             .arg("--stream")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -1146,6 +1210,10 @@ pub async fn run_petals_inference(
                 }
             });
         }
+
+        // Store the new child process
+        let mut process_guard = state.process.lock().unwrap();
+        *process_guard = Some(child);
 
         Ok("Inference started".to_string())
     }

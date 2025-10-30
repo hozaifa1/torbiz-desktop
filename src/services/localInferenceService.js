@@ -2,6 +2,8 @@
 // Local inference service using HuggingFace transformers directly (bypasses Petals DHT)
 
 import { isTauriEnvironment } from '../utils/tauriHelpers';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 
 /**
  * Run local inference using HuggingFace transformers directly
@@ -29,9 +31,6 @@ export async function runLocalInference(modelId, prompt, conversationHistory = [
     console.log('[LOCAL-INFERENCE] Model:', modelId);
     console.log('[LOCAL-INFERENCE] Prompt:', prompt.substring(0, 50) + '...');
     console.log('[LOCAL-INFERENCE] History entries:', conversationHistory.length);
-
-    const { invoke } = await import('@tauri-apps/api/core');
-    const { listen } = await import('@tauri-apps/api/event');
 
     // Set up real-time log listener
     const unlistenLog = await listen('local_inference_log', (event) => {

@@ -11,7 +11,7 @@ import HardwareInfoDisplay from '../components/HardwareInfoDisplay';
 import ShareGpuModal from '../components/ShareGpuModal';
 import api from '../services/api';
 import { streamInference, createInference } from '../services/inferenceService';
-import { runDirectInference, checkPetalsEnvironment } from '../services/directInferenceService';
+import { runDirectInference } from '../services/directInferenceService';
 import { runLocalInference } from '../services/localInferenceService';
 
 // --- Placeholder Data ---

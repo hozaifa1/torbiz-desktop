@@ -14,11 +14,11 @@ use oauth::start_oauth_server;
 use wsl::{setup_wsl_environment, setup_wsl_environment_client};
 use macos::setup_macos_environment;
 use petals::{
-    PetalsState, start_petals_seeder, stop_petals_seeder, 
+    PetalsState, InferenceState, start_petals_seeder, stop_petals_seeder, 
     is_petals_seeder_running, get_petals_seeder_info, 
     get_petals_seeder_logs, mark_wsl_setup_complete, 
     mark_macos_setup_complete, check_petals_inference_ready, 
-    run_petals_inference, run_local_inference
+    run_petals_inference, stop_petals_inference, run_local_inference
 };
 
 // ===== SIMPLE UTILITY COMMANDS =====
@@ -50,6 +50,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .manage(PetalsState::new())
+        .manage(InferenceState::new())
         .invoke_handler(tauri::generate_handler![
             greet,
             show_notification,
@@ -67,6 +68,7 @@ pub fn run() {
             get_petals_seeder_logs,
             check_petals_inference_ready,
             run_petals_inference,
+            stop_petals_inference,
             run_local_inference,
         ])
         .setup(|_app| {

@@ -27,6 +27,8 @@ def main():
                         help="Stream tokens one by one")
     parser.add_argument("--timeout", type=int, default=500,
                         help="Timeout for connecting to Petals (seconds)")
+    parser.add_argument("--conversation-history", type=str, default="[]",
+                        help="JSON array of previous messages for context")
     args = parser.parse_args()
     
     try:
@@ -132,8 +134,50 @@ def main():
             print(json.dumps(error_output), flush=True)
             sys.exit(1)
         
+        # Parse conversation history
+        try:
+            conversation_history = json.loads(args.conversation_history)
+        except Exception as e:
+            logger.warning(f"Could not parse conversation history: {e}. Starting with empty history.")
+            conversation_history = []
+
+        # Build the prompt using the tokenizer's chat template for robustness
+        # This is the recommended way to handle different model formats.
+        chat = []
+        for msg in conversation_history:
+            role = msg.get("role")
+            content = msg.get("content")
+            if role and content and role in ["user", "assistant"]:
+                chat.append({"role": role, "content": content})
+
+        # Add the current user message
+        chat.append({"role": "user", "content": args.prompt})
+
+        try:
+            # Let the tokenizer handle the formatting. add_generation_prompt=True adds the final <|assistant|> token.
+            formatted_prompt = tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
+            logger.info("Successfully applied chat template.")
+        except Exception as e:
+            # Fallback for older transformers versions or models without a template
+            logger.warning(f"Could not apply chat template: {e}. Using manual formatting as a fallback.")
+            if conversation_history:
+                formatted_prompt = ""
+                for msg in conversation_history[-6:]: # Use last 3 exchanges
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    if role == "user":
+                        formatted_prompt += f"<|user|>\n{content}</s>\n"
+                    elif role == "assistant":
+                        formatted_prompt += f"<|assistant|>\n{content}</s>\n"
+                formatted_prompt += f"<|user|>\n{args.prompt}</s>\n<|assistant|>\n"
+            else:
+                formatted_prompt = f"<|user|>\n{args.prompt}</s>\n<|assistant|>\n"
+
+        logger.info(f"Formatted prompt length: {len(formatted_prompt)} chars")
+        
         # Tokenize input
-        inputs = tokenizer(args.prompt, return_tensors="pt")
+        inputs = tokenizer(formatted_prompt, return_tensors="pt")
+        input_length = inputs["input_ids"].shape[1]
         
         if args.stream:
             # Streaming mode - output tokens one by one
@@ -159,12 +203,9 @@ def main():
                 top_p=0.9,
             )
             
-            # Decode the response
-            response_text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-            
-            # Remove the original prompt from response
-            if response_text.startswith(args.prompt):
-                response_text = response_text[len(args.prompt):].strip()
+            # Decode only the generated part (exclude input)
+            generated_ids = outputs[0][input_length:]
+            response_text = tokenizer.decode(generated_ids, skip_special_tokens=True)
             
             # Output as JSON to stdout
             output = {"text": response_text, "done": True}

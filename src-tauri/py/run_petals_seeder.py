@@ -33,6 +33,8 @@ import logging
 import time
 import signal
 import sys
+import os
+import tempfile
 
 # Global flag for graceful shutdown
 shutdown_requested = False
@@ -52,16 +54,36 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGTERM, signal_handler)
 signal.signal(signal.SIGINT, signal_handler)
 
+# Setup log file in a stable location
+def get_log_file_path():
+    """Get a stable log file path that won't be accidentally deleted"""
+    try:
+        # Try to use user's home directory with .torbiz/logs folder
+        log_dir = os.path.join(os.path.expanduser("~"), ".torbiz", "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        return os.path.join(log_dir, "petals_seeder.log")
+    except Exception:
+        # Fallback to system temp directory if home directory fails
+        try:
+            log_dir = os.path.join(tempfile.gettempdir(), "torbiz_logs")
+            os.makedirs(log_dir, exist_ok=True)
+            return os.path.join(log_dir, "petals_seeder.log")
+        except Exception:
+            # Last resort: just use temp file
+            return os.path.join(tempfile.gettempdir(), "petals_seeder.log")
+
 # Configure logging
+log_file_path = get_log_file_path()
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     handlers=[
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler("petals_seeder.log")
+        logging.FileHandler(log_file_path)
     ]
 )
 logger = logging.getLogger(__name__)
+logger.info("Log file location: %s", log_file_path)
 
 def main():
     """
@@ -134,9 +156,6 @@ def main():
     
     logger.info("Initializing Petals Server...")
     logger.info("This may take several minutes on first run (downloading model shards)...")
-    
-    # Import required modules
-    import os
     
     # Save original argv before modification
     original_argv = sys.argv.copy()

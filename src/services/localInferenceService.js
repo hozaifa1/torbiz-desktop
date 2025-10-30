@@ -75,19 +75,23 @@ export async function runLocalInference(modelId, prompt, conversationHistory = [
           return;
         }
         
-        // Handle completion
-        if (data.done) {
-          const reason = data.reason || 'unknown';
-          if (onLog) onLog(`✅ Complete! (stopped by: ${reason})`);
-          if (onComplete) onComplete();
-          unlistenLog();
-          return;
-        }
-        
-        // Handle token streaming
+        // Handle token streaming FIRST (before checking done flag)
         const token = data.token || data.text || '';
         if (token && onToken) {
           onToken(token);
+        }
+        
+        // Handle completion AFTER processing any final token
+        if (data.done) {
+          const reason = data.reason || 'unknown';
+          if (onLog) onLog(`✅ Complete! (stopped by: ${reason})`);
+          
+          // Add delay to ensure all React state updates have processed
+          setTimeout(() => {
+            if (onComplete) onComplete();
+            unlistenLog();
+          }, 100);
+          return;
         }
       } catch (parseError) {
         // Not JSON - show raw line if it looks important

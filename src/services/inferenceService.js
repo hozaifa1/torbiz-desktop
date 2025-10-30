@@ -92,27 +92,34 @@ export async function streamInference(modelId, prompt, userId, onToken, onComple
 
           const data = JSON.parse(jsonStr);
           
-          // Check for completion signal
-          if (data.done === true || data.complete === true || data.finished === true) {
-            console.log('[INFERENCE] Received completion signal', { tokenCount });
-            
-            // Set flag and call onComplete once
-            streamFinishedBySignal = true; 
-            if (onComplete) {
-              onComplete();
-            }
-            break; // Exit the inner loop immediately
-          }
-
-          // Extract token from various possible formats
+          // Extract and process token FIRST (before checking completion)
           const token = data.token || data.text || data.content || data.delta || '';
           
           if (token) {
             tokenCount++;
-            console.log(`[INFERENCE] First token? tokenCount=1, token='${token}'`); 
+            if (tokenCount === 1) {
+              console.log('[INFERENCE] First token received');
+            }
             if (onToken) {
               onToken(token);
             }
+          }
+
+          // Check for completion signal AFTER processing token
+          if (data.done === true || data.complete === true || data.finished === true) {
+            console.log('[INFERENCE] Received completion signal', { tokenCount });
+            
+            // Set flag immediately
+            streamFinishedBySignal = true;
+            
+            // Add delay to ensure all React state updates have processed
+            setTimeout(() => {
+              if (onComplete) {
+                onComplete();
+              }
+            }, 100);
+            
+            break; // Exit the inner loop immediately
           }
 
           // Check for error in response
@@ -151,8 +158,11 @@ export async function streamInference(modelId, prompt, userId, onToken, onComple
         }
         
         // Call onComplete only if the signal wasn't received in the last chunk
+        // Add delay to ensure all React state updates have processed
         if (!streamFinishedBySignal && onComplete) {
-            onComplete();
+            setTimeout(() => {
+              onComplete();
+            }, 100);
         }
 
         break; // Exit the outer while (true) loop

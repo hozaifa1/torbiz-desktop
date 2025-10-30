@@ -57,21 +57,25 @@ export async function runDirectInference(modelId, prompt, conversationHistory, o
           return;
         }
 
-        // Handle token streaming
+        // Handle token streaming FIRST (before checking done flag)
         if (data.token) {
           if (onToken) {
             onToken(data.token);
           }
         }
 
-        // Handle stream completion signal
+        // Handle stream completion signal AFTER processing any final token
         if (data.done === true) {
           console.log('[DIRECT-INFERENCE] Stream completion signal received.');
-          if (onComplete && !streamCompleted) {
-            onComplete();
-            streamCompleted = true;
-          }
-          if (unlisten) unlisten();
+          
+          // Add delay to ensure all React state updates have processed
+          setTimeout(() => {
+            if (onComplete && !streamCompleted) {
+              onComplete();
+              streamCompleted = true;
+            }
+            if (unlisten) unlisten();
+          }, 100);
         }
 
       } catch (e) {

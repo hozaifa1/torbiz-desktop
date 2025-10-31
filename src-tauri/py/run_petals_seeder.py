@@ -256,6 +256,19 @@ def main():
             "--public_name", f"torbiz-{args.node_token[:12]}",  # Identifier on the network
         ]
         
+        # CRITICAL FIX: Add environment variable to bypass strict DHT bootstrap
+        # This allows the server to start even if default bootstrap peers are offline
+        # The server will continue trying to connect in the background
+        os.environ["HIVEMIND_ENSURE_BOOTSTRAP_SUCCESS"] = "false"
+        
+        logger.info("="*60)
+        logger.info("DHT BOOTSTRAP CONFIGURATION")
+        logger.info("Relaxed bootstrap mode enabled (ensure_bootstrap_success=False)")
+        logger.info("Server will start even if default bootstrap peers are offline")
+        logger.info("DHT connection will continue attempting in the background")
+        logger.info("This is the recommended workaround when bootstrap peers are unreachable")
+        logger.info("="*60)
+        
         # Add device specification if not default
         if args.device == "cpu":
             # SIMPLE, PROVEN APPROACH - No more complex calculations
@@ -433,7 +446,7 @@ def main():
         logger.error("Full traceback:", exc_info=True)
         logger.error("=" * 60)
         logger.error("Please report this error to the Torbiz team with the full log above.")
-        logger.error("=" * 60)
+            logger.error("=" * 60)
         sys.exit(1)
     finally:
         # Restore original argv

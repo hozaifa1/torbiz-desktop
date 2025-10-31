@@ -253,6 +253,18 @@ pub async fn start_petals_seeder(
             return Err("macOS environment not set up. Please complete setup first by clicking the Share GPU button.".to_string());
         }
 
+        // Sync time before starting Petals (similar to WSL restart on Windows)
+        println!("[MACOS] Synchronizing system time...");
+        #[cfg(target_os = "macos")]
+        {
+            use crate::macos::sync_macos_time;
+            if let Err(e) = sync_macos_time() {
+                println!("[MACOS] Time sync warning: {}", e);
+                // Continue anyway - don't block startup
+            }
+        }
+        println!("[MACOS] Time synchronization complete");
+
         println!("[PETALS] Starting Petals on macOS...");
         println!("[PETALS] Model: {}", model_name);
 
@@ -373,7 +385,15 @@ pub async fn start_petals_seeder(
                         
                         // Detect critical errors
                         if line.contains("Error") || line.contains("ERROR") || line.contains("Failed") || line.contains("Traceback") {
-                            let _ = app_handle.emit("petals_error", format!("macOS Error: {}", line));
+                            // Special handling for 401 errors (time sync issues)
+                            if line.contains("401") || line.contains("Unauthorized") {
+                                let _ = app_handle.emit("petals_error", format!(
+                                    "Authentication Error: {}. This may be due to system time being out of sync. Try restarting the app or manually syncing time in System Preferences > Date & Time.",
+                                    line
+                                ));
+                            } else {
+                                let _ = app_handle.emit("petals_error", format!("macOS Error: {}", line));
+                            }
                         }
                     }
                 }

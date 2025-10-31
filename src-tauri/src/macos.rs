@@ -146,6 +146,41 @@ pub fn install_petals_macos() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+pub fn sync_macos_time() -> Result<(), String> {
+    println!("[MACOS] Synchronizing system time with NTP server...");
+    
+    // Try to sync time using sntp
+    // First attempt: without sudo (may work if time daemon is already running)
+    let output = Command::new("sntp")
+        .arg("-sS")
+        .arg("time.apple.com")
+        .output();
+    
+    match output {
+        Ok(result) => {
+            if result.status.success() {
+                println!("[MACOS] Time synchronized successfully");
+                Ok(())
+            } else {
+                // If it failed, it might be a permission issue
+                let stderr = String::from_utf8_lossy(&result.stderr);
+                println!("[MACOS] Time sync warning: {}", stderr);
+                
+                // Don't fail - continue anyway and let Petals/AWS handle it
+                // User might have correct time already
+                println!("[MACOS] Continuing despite sync warning...");
+                Ok(())
+            }
+        }
+        Err(e) => {
+            // Command not found or other error - don't fail
+            println!("[MACOS] Could not run sntp: {}. Continuing anyway...", e);
+            Ok(())
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn setup_macos_environment(
     window: tauri::Window,
@@ -216,6 +251,13 @@ pub async fn setup_macos_environment(
             if !check_petals_installed() {
                 return Err("Petals installation completed but verification failed. Please restart the app.".to_string());
             }
+        }
+        
+        // Sync time before completing setup
+        emit_progress("sync_time", "Synchronizing system time...", 95);
+        if let Err(e) = sync_macos_time() {
+            println!("[MACOS-SETUP] Time sync warning: {}", e);
+            // Don't fail setup for this
         }
         
         emit_progress("complete", "macOS environment ready for Petals!", 100);

@@ -6,17 +6,9 @@ import { X, CheckCircle, AlertTriangle, Loader, PowerOff, Download, Info } from 
 import { isTauriEnvironment } from '../utils/tauriHelpers';
 
 // Enhanced model metadata with shard information
-// Shard counts based on actual transformer layer counts
+// Shard counts based on actual transformer layer counts from model architectures
 const supportedModels = [
   // Small models
-  { 
-    id: 'google/gemma-2-2b', 
-    name: 'Gemma 2 2B', 
-    totalShards: 18,
-    vramPerShard: 0.15,
-    totalModelSize: 2.6,
-    description: 'Lightweight Google model with 18 transformer layers'
-  },
   { 
     id: 'TinyLlama/TinyLlama-1.1B-Chat-v1.0', 
     name: 'TinyLlama 1.1B Chat', 
@@ -26,10 +18,18 @@ const supportedModels = [
     description: 'Ultra-lightweight chat model with 22 transformer layers'
   },
   { 
+    id: 'google/gemma-2-2b', 
+    name: 'Gemma 2 2B', 
+    totalShards: 26,
+    vramPerShard: 0.12,
+    totalModelSize: 2.6,
+    description: 'Efficient Google model with 26 transformer layers'
+  },
+  { 
     id: 'microsoft/phi-3-mini-3.8b', 
     name: 'Phi-3 Mini 3.8B', 
     totalShards: 32,
-    vramPerShard: 0.12,
+    vramPerShard: 0.14,
     totalModelSize: 3.8,
     description: 'Efficient small model from Microsoft with 32 layers'
   },
@@ -120,17 +120,26 @@ function canHostOnCpu(totalRAMGB, model) {
 function calculateCpuHostableShards(totalRAMGB, model) {
   if (!totalRAMGB || totalRAMGB <= 0) return 0;
   
-  // Match backend conservative limit: max 1GB or 50% of available RAM
-  const maxRamBudget = Math.min(1.0, (totalRAMGB - 2.0) * 0.5);
+  // More reasonable approach: allow up to 60% of available RAM for model blocks
+  // Reserve 2GB for OS and 1GB for Petals overhead
+  const availableRAM = Math.max(0, totalRAMGB - 3.0);
+  const maxRamBudget = availableRAM * 0.6; // Use up to 60% of available RAM
   
-  // Reserve 0.5GB for Petals overhead
-  const ramForBlocks = Math.max(0.1, maxRamBudget - 0.5);
+  // Estimate RAM per block based on model size
+  // Small models (~1-3GB): ~100-150MB per block
+  // Medium models (7-8GB): ~250-300MB per block
+  const estimatedRamPerBlock = model.totalModelSize < 4 
+    ? 0.15  // 150MB for small models
+    : model.totalModelSize < 10 
+      ? 0.25  // 250MB for medium models
+      : 0.4;  // 400MB for larger models
   
-  // Calculate blocks with 100MB per block estimate
-  const hostableShards = Math.floor(ramForBlocks / 0.1);
+  // Calculate how many blocks can fit
+  const hostableShards = Math.floor(maxRamBudget / estimatedRamPerBlock);
   
-  // Ensure at least 1, cap at 8, and don't exceed model total
-  return Math.max(1, Math.min(hostableShards, 8, model.totalShards));
+  // Ensure at least 1, but don't exceed model total
+  // Remove the artificial cap of 8 - let user host as much as RAM allows
+  return Math.max(1, Math.min(hostableShards, model.totalShards));
 }
 
 // Helper to extract VRAM from GPU info string

@@ -219,33 +219,34 @@ def main():
         
         # Add device specification if not default
         if args.device == "cpu":
-            # Calculate optimal number of blocks based on available RAM with conservative limits
+            # Calculate optimal number of blocks based on available RAM
+            # Allow more blocks to enable hosting larger portions of models
             try:
                 import psutil
                 # Get available memory in GB
                 total_ram_gb = psutil.virtual_memory().total / (1024**3)
                 
-                # Conservative limit: max 1GB total, or 50% of available RAM
-                max_ram_budget = min(1.0, (total_ram_gb - 2.0) * 0.5)
-                
-                # Reserve 0.5GB for Petals overhead (cache, buffers, etc.)
-                overhead_gb = 0.5
-                ram_for_blocks = max(0.1, max_ram_budget - overhead_gb)
+                # More reasonable approach: use up to 60% of available RAM
+                # Reserve 3GB total (2GB for OS, 1GB for Petals overhead)
+                available_ram = max(0.5, total_ram_gb - 3.0)
+                max_ram_budget = available_ram * 0.6  # Use 60% of available RAM for blocks
                 
                 logger.info("Total system RAM: %.2f GB", total_ram_gb)
-                logger.info("Max RAM budget: %.2f GB (conservative limit)", max_ram_budget)
-                logger.info("RAM for blocks after overhead: %.2f GB", ram_for_blocks)
+                logger.info("Available RAM after reserves: %.2f GB", available_ram)
+                logger.info("Max RAM budget for blocks: %.2f GB (60%% of available)", max_ram_budget)
                 
-                # Calculate blocks (100MB per block estimate)
-                block_size_gb = 0.1
-                num_blocks = max(1, int(ram_for_blocks / block_size_gb))
+                # Estimate RAM per block - 150MB is more realistic for most models
+                # Small models use less, but 150MB is a safe average
+                block_size_gb = 0.15
+                num_blocks = max(1, int(max_ram_budget / block_size_gb))
                 
-                # Absolute maximum cap for safety
-                num_blocks = min(num_blocks, 8)
+                # Cap at reasonable maximum to prevent system instability
+                # 30 blocks should be enough for most small-to-medium models
+                num_blocks = min(num_blocks, 30)
                 
-                logger.info("Calculated blocks: %d (%.2f GB per block)", num_blocks, block_size_gb)
+                logger.info("Calculated blocks: %d (~%.2f GB per block)", num_blocks, block_size_gb)
                 server_args.extend(["--torch_dtype", "float32", "--num_blocks", str(num_blocks)])
-                logger.info("Running in CPU-only mode with %d blocks (~%.2f GB RAM)", num_blocks, num_blocks * block_size_gb)
+                logger.info("Running in CPU-only mode with %d blocks (~%.2f GB RAM total)", num_blocks, num_blocks * block_size_gb)
             except ImportError:
                 # Fallback if psutil not available
                 logger.warning("psutil not available, using 1 block (install psutil for dynamic block calculation)")

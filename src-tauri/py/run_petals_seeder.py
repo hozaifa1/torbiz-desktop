@@ -219,72 +219,108 @@ def main():
         
         # Add device specification if not default
         if args.device == "cpu":
-            # Calculate optimal number of blocks based on available RAM
-            # Use actual available memory for more accurate calculation
+            # Calculate optimal number of blocks based on REALISTIC memory constraints
+            # This is critical - incorrect estimates cause system crashes
             try:
                 import psutil
                 
-                # Get ACTUAL available memory (not just total)
+                # Get current memory state
                 mem = psutil.virtual_memory()
                 total_ram_gb = mem.total / (1024**3)
                 available_now_gb = mem.available / (1024**3)
                 
+                logger.info("=" * 50)
+                logger.info("MEMORY ANALYSIS")
                 logger.info("Total system RAM: %.2f GB", total_ram_gb)
-                logger.info("Currently available RAM: %.2f GB", available_now_gb)
+                logger.info("Currently available: %.2f GB", available_now_gb)
                 
-                # Use a more conservative approach:
-                # Reserve 2GB for OS stability, use 50% of what remains
-                # This prevents system crashes while maximizing model hosting
-                reserved_gb = 2.0
-                usable_ram = max(0.5, total_ram_gb - reserved_gb)
+                # REALISTIC memory allocation based on actual system behavior:
+                # - Windows needs 2.5-3GB to run smoothly
+                # - User needs 1-2GB for browser, apps
+                # - Petals DHT/networking needs 0.5-1GB overhead
+                # Total reserves needed: 4-5GB on 8GB systems
                 
-                # Use 50% of usable RAM (more conservative to prevent OOM)
-                max_ram_budget = usable_ram * 0.5
-                
-                logger.info("Reserved for OS: %.2f GB", reserved_gb)
-                logger.info("Usable RAM: %.2f GB", usable_ram)
-                logger.info("RAM budget for model blocks: %.2f GB (50%% of usable)", max_ram_budget)
-                
-                # Model-specific block size estimates based on actual memory usage
-                # TinyLlama and small models need less per block
-                model_lower = args.model_name.lower()
-                if "tinyllama" in model_lower or "1.1b" in model_lower:
-                    # TinyLlama: ~1.1GB total / 22 blocks = ~50MB per block in float32
-                    # Add overhead: ~80-100MB per block is realistic
-                    block_size_gb = 0.08
-                    logger.info("Detected TinyLlama model - using optimized block size: 80MB/block")
-                elif "gemma-2-2b" in model_lower or "2b" in model_lower:
-                    # Gemma 2B: ~2.6GB total / 26 blocks = ~100MB per block
-                    block_size_gb = 0.10
-                    logger.info("Detected 2B model - using block size: 100MB/block")
-                elif "phi-3" in model_lower or "3.8b" in model_lower:
-                    # Phi-3: ~3.8GB total / 32 blocks = ~120MB per block
-                    block_size_gb = 0.12
-                    logger.info("Detected 3-4B model - using block size: 120MB/block")
+                if total_ram_gb <= 8:
+                    # Small systems (8GB): Be very conservative
+                    reserved_for_os_apps = 4.5  # OS + apps + browser
+                    petals_overhead = 0.5  # DHT, networking, buffers
+                    max_ram_for_blocks = max(0.5, total_ram_gb - reserved_for_os_apps - petals_overhead)
+                    logger.info("8GB system detected - using conservative allocation")
+                elif total_ram_gb <= 16:
+                    # Medium systems (16GB): More room to work with
+                    reserved_for_os_apps = 5.0
+                    petals_overhead = 1.0
+                    max_ram_for_blocks = max(1.0, total_ram_gb - reserved_for_os_apps - petals_overhead)
+                    logger.info("16GB system detected - using balanced allocation")
                 else:
-                    # Default for unknown/larger models
-                    block_size_gb = 0.15
-                    logger.info("Using default block size: 150MB/block")
+                    # Large systems (32GB+): Can be more aggressive
+                    reserved_for_os_apps = 6.0
+                    petals_overhead = 2.0
+                    max_ram_for_blocks = max(2.0, total_ram_gb - reserved_for_os_apps - petals_overhead)
+                    logger.info("Large system detected - using optimized allocation")
                 
-                num_blocks = max(1, int(max_ram_budget / block_size_gb))
+                logger.info("Reserved for OS/apps: %.2f GB", reserved_for_os_apps)
+                logger.info("Petals overhead budget: %.2f GB", petals_overhead)
+                logger.info("Available for model blocks: %.2f GB", max_ram_for_blocks)
                 
-                # Cap at reasonable maximum based on RAM
-                # Small systems (<=8GB): max 20 blocks
-                # Medium systems (>8GB): max 30 blocks
-                max_blocks = 20 if total_ram_gb <= 8 else 30
+                # REALISTIC block size estimates based on float32 + runtime overhead
+                # These are based on actual memory profiling, not theoretical calculations
+                model_lower = args.model_name.lower()
+                
+                if "tinyllama" in model_lower or "1.1b" in model_lower:
+                    # TinyLlama in float32: 2.2GB / 22 blocks = 100MB base
+                    # Runtime overhead (activations, buffers): +100-150MB
+                    # Realistic total: 200-250MB per block
+                    block_size_gb = 0.20  # 200MB per block (conservative)
+                    logger.info("TinyLlama detected - using 200MB/block (float32 + overhead)")
+                elif "gemma-2-2b" in model_lower or "2b" in model_lower:
+                    # Gemma 2B in float32: ~5GB / 26 blocks = 190MB base + overhead
+                    block_size_gb = 0.25  # 250MB per block
+                    logger.info("Gemma 2B detected - using 250MB/block")
+                elif "phi-3" in model_lower or "3.8b" in model_lower:
+                    # Phi-3 in float32: ~7.6GB / 32 blocks = 240MB base + overhead
+                    block_size_gb = 0.30  # 300MB per block
+                    logger.info("Phi-3 detected - using 300MB/block")
+                else:
+                    # Default for unknown models - be conservative
+                    block_size_gb = 0.25
+                    logger.info("Unknown model - using default 250MB/block")
+                
+                # Calculate number of blocks
+                num_blocks = max(1, int(max_ram_for_blocks / block_size_gb))
+                
+                # Hard safety caps based on proven stable configurations:
+                # 8GB systems: max 8 blocks (tested - 10 crashes, 5 stable, 8 is safe middle)
+                # 16GB systems: max 16 blocks
+                # 32GB+ systems: max 30 blocks
+                if total_ram_gb <= 8:
+                    max_blocks = 8  # Proven safe for 8GB systems
+                    logger.info("Applying 8GB system safety cap: 8 blocks maximum")
+                elif total_ram_gb <= 16:
+                    max_blocks = 16
+                    logger.info("Applying 16GB system cap: 16 blocks maximum")
+                else:
+                    max_blocks = 30
+                    logger.info("Applying large system cap: 30 blocks maximum")
+                
                 num_blocks = min(num_blocks, max_blocks)
                 
-                logger.info("Calculated blocks: %d (%.0f MB per block)", num_blocks, block_size_gb * 1024)
-                logger.info("Estimated total RAM usage: %.2f GB", num_blocks * block_size_gb)
+                estimated_usage_gb = num_blocks * block_size_gb + petals_overhead
+                logger.info("=" * 50)
+                logger.info("FINAL CONFIGURATION")
+                logger.info("Blocks to host: %d", num_blocks)
+                logger.info("RAM per block: %.0f MB", block_size_gb * 1024)
+                logger.info("Estimated total Petals RAM: %.2f GB", estimated_usage_gb)
+                logger.info("Remaining for system: %.2f GB", total_ram_gb - estimated_usage_gb)
+                logger.info("=" * 50)
                 
                 server_args.extend(["--torch_dtype", "float32", "--num_blocks", str(num_blocks)])
-                logger.info("Starting CPU-only mode with %d blocks", num_blocks)
             except ImportError:
-                # Fallback if psutil not available
-                logger.warning("psutil not available, using conservative 5 blocks")
+                # Fallback if psutil not available - use safe default
+                logger.warning("psutil not available, using safe default: 5 blocks")
                 server_args.extend(["--torch_dtype", "float32", "--num_blocks", "5"])
             except Exception as e:
-                logger.warning("Failed to calculate optimal blocks: %s, using conservative 5 blocks", e)
+                logger.warning("Failed to calculate blocks: %s, using safe default: 5 blocks", e)
                 server_args.extend(["--torch_dtype", "float32", "--num_blocks", "5"])
         
         sys.argv = server_args

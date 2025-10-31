@@ -225,17 +225,15 @@ function ShareGpuModal({ isOpen, onClose }) {
             setStatus('success');
             
             const model = supportedModels.find(m => m.id === modelInfo);
-            if (model && gpuVram !== null) {
+            if (model && gpuVram !== null && hasNvidiaGpu) {
               const hostableShards = calculateHostableShards(gpuVram, model.vramPerShard);
               let msg = `Currently sharing ${model.name}`;
-              if (hostableShards !== null) {
-                if (hostableShards >= model.totalShards) {
-                  msg += ` (hosting all ${model.totalShards} shards)`;
-                } else if (hostableShards === 1) {
-                  msg += ` (hosting 1 of ${model.totalShards} shards)`;
-                } else {
-                  msg += ` (hosting ~${hostableShards} of ${model.totalShards} shards)`;
-                }
+              if (hostableShards >= model.totalShards) {
+                msg += ` (hosting full model)`;
+              } else if (hostableShards === 1) {
+                msg += ` (hosting 1 block)`;
+              } else {
+                msg += ` (hosting ${hostableShards} blocks)`;
               }
               setMessage(msg);
             } else {
@@ -351,18 +349,19 @@ function ShareGpuModal({ isOpen, onClose }) {
             setActiveModelId(selectedModel);
             
             const modelInfo = supportedModels.find(m => m.id === selectedModel);
-            const hostableShards = gpuVram ? calculateHostableShards(gpuVram, modelInfo.vramPerShard) : null;
             
             let successMessage = `Successfully sharing ${modelInfo.name}`;
-            if (hostableShards !== null) {
+            
+            // Only show specific block counts for NVIDIA GPUs with known VRAM
+            if (hasNvidiaGpu && gpuVram !== null) {
+              const hostableShards = calculateHostableShards(gpuVram, modelInfo.vramPerShard);
               if (hostableShards >= modelInfo.totalShards) {
-                successMessage += ` (hosting all ${modelInfo.totalShards} shards)`;
-              } else if (hostableShards === 1) {
-                successMessage += ` (hosting 1 of ${modelInfo.totalShards} shards)`;
+                successMessage += ` (hosting full model)`;
               } else {
-                successMessage += ` (hosting ~${hostableShards} of ${modelInfo.totalShards} shards)`;
+                successMessage += ` (hosting ${hostableShards} blocks)`;
               }
             }
+            
             setMessage(successMessage);
           }
         });
@@ -547,15 +546,10 @@ function ShareGpuModal({ isOpen, onClose }) {
 
     // Step 3: Start Petals seeder
     if (!isTauriEnvironment()) {
-      const hostableShards = gpuVram 
-        ? calculateHostableShards(gpuVram, modelInfo.vramPerShard) 
-        : '?';
-      
       setStatus('success');
       setActiveModelId(selectedModel);
       setMessage(
         `GPU registered successfully for ${modelInfo.name}. ` +
-        (gpuVram ? `Your GPU can host approximately ${hostableShards} of ${modelInfo.totalShards} shards. ` : '') +
         `(Petals seeder only works in desktop app)`
       );
       return;
@@ -700,11 +694,17 @@ function ShareGpuModal({ isOpen, onClose }) {
 
   // Get selected model info for display
   const selectedModelInfo = supportedModels.find(m => m.id === selectedModel);
-  const hostableShards = selectedModelInfo
-    ? (hasNvidiaGpu && gpuVram !== null)
-      ? calculateHostableShards(gpuVram, selectedModelInfo.vramPerShard)
-      : calculateCpuHostableShards(hardwareInfo?.total_memory, selectedModelInfo)
+  
+  // Only calculate specific shard counts for NVIDIA GPUs with known VRAM
+  // For macOS Metal GPUs and other cases, don't show misleading estimates
+  const hostableShards = selectedModelInfo && hasNvidiaGpu && gpuVram !== null
+    ? calculateHostableShards(gpuVram, selectedModelInfo.vramPerShard)
     : null;
+  
+  // For macOS, determine if model can be hosted based on size (without specific block count)
+  const canHostOnMac = selectedModelInfo && isMacOS && !hasNvidiaGpu
+    ? selectedModelInfo.totalModelSize <= (hardwareInfo?.total_memory || 0) * 0.5 // Can host if model is less than 50% of RAM
+    : false;
 
   return (
     <div className="modal-overlay">
@@ -972,11 +972,24 @@ function ShareGpuModal({ isOpen, onClose }) {
                 style={{ marginBottom: '0.5rem' }}
               >
                 {supportedModels.map(model => {
-                  // For GPU: check VRAM capacity
-                  // For CPU: check if model fits in available RAM
-                  const canHost = hasNvidiaGpu 
-                    ? (gpuVram !== null ? calculateHostableShards(gpuVram, model.vramPerShard) > 0 : true)
-                    : canHostOnCpu(hardwareInfo?.total_memory, model);
+                  // Determine if model can be hosted
+                  let canHost;
+                  let reason = '';
+                  
+                  if (hasNvidiaGpu && gpuVram !== null) {
+                    // NVIDIA GPU: check actual VRAM capacity
+                    canHost = calculateHostableShards(gpuVram, model.vramPerShard) > 0;
+                    reason = !canHost ? ' - Insufficient VRAM' : '';
+                  } else if (isMacOS && !hasNvidiaGpu) {
+                    // macOS Metal GPU: check based on total model size vs RAM
+                    const totalRAM = hardwareInfo?.total_memory || 0;
+                    canHost = model.totalModelSize <= totalRAM * 0.5; // Conservative: model should be less than 50% of RAM
+                    reason = !canHost ? ' - Requires more RAM' : '';
+                  } else {
+                    // CPU-only or unknown: be permissive
+                    canHost = canHostOnCpu(hardwareInfo?.total_memory, model);
+                    reason = !canHost ? ' - Too large' : '';
+                  }
                   
                   return (
                     <option 
@@ -990,8 +1003,8 @@ function ShareGpuModal({ isOpen, onClose }) {
                       }}
                     >
                       {canHost ? '✓ ' : '✗ '}
-                      {model.name} ({model.totalShards} shards, {model.vramPerShard}GB/shard)
-                      {!canHost && (hasNvidiaGpu ? ' - Insufficient VRAM' : ' - Too large for CPU')}
+                      {model.name} ({model.totalModelSize}GB model)
+                      {reason}
                     </option>
                   );
                 })}
@@ -1015,12 +1028,11 @@ function ShareGpuModal({ isOpen, onClose }) {
                         • Total size: {selectedModelInfo.totalModelSize}GB
                       </div>
                       <div className="text-muted" style={{ marginBottom: '0.25rem' }}>
-                        • Shards: {selectedModelInfo.totalShards} total
+                        • Architecture: {selectedModelInfo.totalShards} transformer blocks
                       </div>
-                      <div className="text-muted" style={{ marginBottom: '0.25rem' }}>
-                        • VRAM per shard: {selectedModelInfo.vramPerShard}GB
-                      </div>
-                      {hostableShards !== null && (
+                      
+                      {/* Show specific block estimates only for NVIDIA GPUs with known VRAM */}
+                      {hostableShards !== null ? (
                         <div className={hostableShards > 0 ? 'alert-box success' : 'alert-box error'} 
                              style={{ 
                           marginTop: '0.5rem', 
@@ -1029,15 +1041,27 @@ function ShareGpuModal({ isOpen, onClose }) {
                           fontWeight: '500'
                         }}>
                           {hostableShards > 0 ? (
-                            <>✓ Your {hasNvidiaGpu ? 'GPU' : 'CPU'} can host ~{hostableShards} shard{hostableShards !== 1 ? 's' : ''}</>
+                            <>✓ Your GPU can host ~{hostableShards} block{hostableShards !== 1 ? 's' : ''} ({Math.round(hostableShards / selectedModelInfo.totalShards * 100)}% of model)</>
                           ) : (
-                            <>✗ Your {hasNvidiaGpu ? 'GPU' : 'CPU'} cannot host any shard of this model</>
+                            <>✗ Your GPU cannot host this model (needs {selectedModelInfo.vramPerShard}GB+ VRAM per block)</>
                           )}
                         </div>
-                      )}
-                      {!hasNvidiaGpu && hostableShards !== null && hostableShards > 0 && (
-                        <div className="alert-box warning" style={{ marginTop: '0.5rem', padding: '0.5rem', fontSize: '0.85em' }}>
-                          ⚠️ CPU mode: Performance will be slower than GPU. Petals will auto-detect optimal block count based on available RAM.
+                      ) : canHostOnMac ? (
+                        /* macOS Metal GPU - show general capability without fake numbers */
+                        <div className="alert-box success" style={{ marginTop: '0.5rem', padding: '0.5rem', fontSize: '0.9em', fontWeight: '500' }}>
+                          ✓ Your Mac can host this model using Metal GPU acceleration
+                        </div>
+                      ) : isMacOS && !hasNvidiaGpu ? (
+                        /* macOS but model too large */
+                        <div className="alert-box warning" style={{ marginTop: '0.5rem', padding: '0.5rem', fontSize: '0.9em' }}>
+                          ⚠️ This model may require more RAM than available. Petals will auto-adjust.
+                        </div>
+                      ) : null}
+                      
+                      {/* Info about Petals auto-detection for non-NVIDIA systems */}
+                      {!hasNvidiaGpu && (isMacOS || canHostOnMac) && (
+                        <div className="alert-box info" style={{ marginTop: '0.5rem', padding: '0.5rem', fontSize: '0.85em' }}>
+                          ℹ️ Petals will automatically determine the optimal number of blocks based on your available memory.
                         </div>
                       )}
                     </div>
@@ -1064,9 +1088,12 @@ function ShareGpuModal({ isOpen, onClose }) {
                       fontSize: '0.9em'
                     }} className="text-muted">
                       <p style={{ margin: '0 0 0.5rem 0' }}>{selectedModelInfo.description}</p>
+                      <p style={{ margin: '0.5rem 0', fontStyle: 'italic' }}>
+                        Petals distributes model blocks across multiple computers. Each participant hosts a portion, and the network combines them for inference.
+                      </p>
                       {hostableShards !== null && hostableShards > 0 && hostableShards < selectedModelInfo.totalShards && (
                         <p style={{ margin: 0, fontStyle: 'italic' }}>
-                          You'll be contributing ~{hostableShards} blocks. The network combines contributions from multiple hosts to serve the full {selectedModelInfo.totalShards}-block model.
+                          Your GPU will contribute approximately {hostableShards} blocks to the network.
                         </p>
                       )}
                     </div>
@@ -1146,7 +1173,7 @@ function ShareGpuModal({ isOpen, onClose }) {
             <button 
               className="modal-action-btn primary" 
               onClick={handleShare} 
-              disabled={isLoading || (hostableShards !== null && hostableShards === 0)}
+              disabled={isLoading || (hostableShards !== null && hostableShards === 0) || (isMacOS && !hasNvidiaGpu && !canHostOnMac)}
             >
               {status === 'error-register' ? 'Try Again' : 'Start Sharing'}
             </button>
@@ -1270,23 +1297,18 @@ function ShareGpuModal({ isOpen, onClose }) {
             {status === 'success' && (
               <div className="alert-box success" style={{ marginTop: '1rem', fontSize: '0.9em', textAlign: 'left' }}>
                 <p style={{ margin: '0 0 0.5rem 0', fontWeight: '500' }}>
-                  ✓ Your GPU is contributing to the decentralized AI network
+                  ✓ Your {isMacOS && !hasNvidiaGpu ? 'Mac' : 'GPU'} is contributing to the decentralized AI network
                 </p>
-                {status === 'success' && (
-  <div className="alert-box success" style={{ marginTop: '1rem', fontSize: '0.9em', textAlign: 'left' }}>
-    <p style={{ margin: '0 0 0.5rem 0', fontWeight: '500' }}>
-      ✓ Your GPU is contributing to the decentralized AI network
-    </p>
-    {selectedModelInfo && hostableShards !== null && (
-      <p style={{ margin: 0, color: '#1e8e3e', fontSize: '0.95em' }}>
-        Estimated hosting: ~{hostableShards} blocks (of {selectedModelInfo.totalShards} total)
-        {!hasNvidiaGpu && (
-          <span style={{ display: 'block', fontSize: '0.85em', marginTop: '0.25rem', color: '#666' }}>
-            Petals will determine actual blocks based on RAM
-          </span>
-        )}
-      </p>
-    )}
+                {selectedModelInfo && hostableShards !== null && (
+                  <p style={{ margin: 0, color: '#1e8e3e', fontSize: '0.95em' }}>
+                    Hosting approximately {hostableShards} blocks ({Math.round(hostableShards / selectedModelInfo.totalShards * 100)}% of the model)
+                  </p>
+                )}
+                {selectedModelInfo && !hostableShards && canHostOnMac && (
+                  <p style={{ margin: 0, color: '#1e8e3e', fontSize: '0.95em' }}>
+                    Hosting {selectedModelInfo.name} with Metal GPU acceleration
+                  </p>
+                )}
     
     {/* *** ADD THIS: Logs button *** */}
     <button
@@ -1326,16 +1348,6 @@ function ShareGpuModal({ isOpen, onClose }) {
     )}
   </div>
 )}
-                {selectedModelInfo && hostableShards !== null && (
-                  <p style={{ margin: 0, fontSize: '0.95em' }}>
-                    Estimated hosting: ~{hostableShards} blocks (of {selectedModelInfo.totalShards} total)
-                    {!hasNvidiaGpu && (
-                      <span style={{ display: 'block', fontSize: '0.85em', marginTop: '0.25rem', color: '#666' }}>
-                        Petals will determine actual blocks based on RAM
-                      </span>
-                    )}
-                  </p>
-                )}
               </div>
             )}
             <button 

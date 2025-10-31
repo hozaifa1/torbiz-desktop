@@ -446,7 +446,7 @@ def main():
         logger.error("Full traceback:", exc_info=True)
         logger.error("=" * 60)
         logger.error("Please report this error to the Torbiz team with the full log above.")
-            logger.error("=" * 60)
+        logger.error("=" * 60)
         sys.exit(1)
     finally:
         # Restore original argv

@@ -1281,7 +1281,9 @@ function ShareGpuModal({ isOpen, onClose }) {
                   Petals Failed to Start
                 </h4>
                 <p style={{ marginBottom: '0.5rem', fontSize: '0.9em' }}>
-                  {seederError.includes('ImportError') || seederError.includes('ModuleNotFoundError') ? 
+                  {seederError.includes('DHTNode bootstrap failed') || seederError.includes('DHT NETWORK CONNECTION ERROR') ? 
+                    '🌐 Network Connection Error - Cannot reach Petals P2P network' :
+                   seederError.includes('ImportError') || seederError.includes('ModuleNotFoundError') ? 
                     'Missing Python dependencies. Please reinstall by clicking "Share GPU" again.' :
                    seederError.includes('device') ? 'The model configuration is incompatible. This may be because:' :
                    seederError.includes('CUDA') || seederError.includes('GPU') ? 'GPU error occurred:' :
@@ -1318,7 +1320,31 @@ function ShareGpuModal({ isOpen, onClose }) {
                     💡 Note: You're running in CPU mode. Your system has {hardwareInfo?.gpu_info?.[0] || 'a non-NVIDIA GPU'}. Some CUDA-related errors are expected.
                   </p>
                 )}
-                {seederError.includes('Traceback') && (
+                {(seederError.includes('DHTNode bootstrap failed') || seederError.includes('DHT NETWORK CONNECTION ERROR')) && (
+                  <div style={{ marginTop: '0.75rem', padding: '0.75rem', backgroundColor: '#fff3cd', borderRadius: '6px', border: '1px solid #ffc107' }}>
+                    <h5 style={{ margin: '0 0 0.5rem 0', color: '#856404', fontSize: '0.95em' }}>
+                      🔧 How to Fix Network Connection Issues:
+                    </h5>
+                    <ol style={{ margin: '0', paddingLeft: '1.5rem', fontSize: '0.85em', color: '#856404' }}>
+                      <li style={{ marginBottom: '0.5rem' }}>
+                        <strong>Check macOS Firewall:</strong> System Preferences → Security & Privacy → Firewall → Firewall Options → Allow Torbiz
+                      </li>
+                      <li style={{ marginBottom: '0.5rem' }}>
+                        <strong>Network Type:</strong> P2P may be blocked on university/corporate WiFi. Try home network or mobile hotspot.
+                      </li>
+                      <li style={{ marginBottom: '0.5rem' }}>
+                        <strong>VPN/Proxy:</strong> Temporarily disable VPN or proxy and try again.
+                      </li>
+                      <li style={{ marginBottom: '0.5rem' }}>
+                        <strong>Internet Connection:</strong> Verify you have stable internet connectivity.
+                      </li>
+                      <li>
+                        <strong>Router/ISP:</strong> Some ISPs block P2P traffic. Try different network or contact ISP.
+                      </li>
+                    </ol>
+                  </div>
+                )}
+                {seederError.includes('Traceback') && !seederError.includes('DHTNode bootstrap failed') && (
                   <details style={{ marginTop: '0.5rem', fontSize: '0.85em' }}>
                     <summary style={{ cursor: 'pointer', color: '#1a73e8', fontWeight: '500' }}>
                       💡 How to fix this error

@@ -378,7 +378,7 @@ def main():
         
         logger.error("=" * 60)
         sys.exit(1)
-    except (KeyboardInterrupt, OSError) as e:
+    except (KeyboardInterrupt, OSError, RuntimeError) as e:
         error_msg = str(e)
         logger.error("=" * 60)
         logger.error("RUNTIME ERROR DETECTED")
@@ -387,7 +387,27 @@ def main():
         logger.error("=" * 60)
         
         # Provide helpful hints for common errors
-        if "local time must be within" in error_msg:
+        if "DHTNode bootstrap failed" in error_msg or "initial_peers responded" in error_msg:
+            logger.error("DHT NETWORK CONNECTION ERROR")
+            logger.error("Cannot connect to Petals peer-to-peer network.")
+            logger.error("")
+            logger.error("COMMON CAUSES:")
+            logger.error("1. Firewall blocking P2P connections")
+            logger.error("   SOLUTION (macOS): System Preferences > Security & Privacy > Firewall")
+            logger.error("   - Add Torbiz to allowed apps OR disable firewall temporarily")
+            logger.error("")
+            logger.error("2. Restrictive network (university/corporate/public WiFi)")
+            logger.error("   SOLUTION: Try on home network or mobile hotspot")
+            logger.error("")
+            logger.error("3. VPN/Proxy interference")
+            logger.error("   SOLUTION: Temporarily disable VPN and try again")
+            logger.error("")
+            logger.error("4. Internet connection issues")
+            logger.error("   SOLUTION: Check your internet connection")
+            logger.error("")
+            logger.error("5. ISP blocking P2P ports")
+            logger.error("   SOLUTION: Contact your ISP or try different network")
+        elif "local time must be within" in error_msg:
             logger.error("TIME SYNC ERROR DETECTED")
             logger.error("Your system clock is out of sync with the Petals network.")
             logger.error("SOLUTION (macOS): Go to System Preferences > Date & Time > Enable 'Set time automatically'")

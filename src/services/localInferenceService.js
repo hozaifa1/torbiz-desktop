@@ -85,12 +85,8 @@ export async function runLocalInference(modelId, prompt, conversationHistory = [
         if (data.done) {
           const reason = data.reason || 'unknown';
           if (onLog) onLog(`✅ Complete! (stopped by: ${reason})`);
-          
-          // Add delay to ensure all React state updates have processed
-          setTimeout(() => {
-            if (onComplete) onComplete();
-            unlistenLog();
-          }, 100);
+          if (onComplete) onComplete();
+          unlistenLog();
           return;
         }
       } catch (parseError) {

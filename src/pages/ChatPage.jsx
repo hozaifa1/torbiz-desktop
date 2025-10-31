@@ -61,6 +61,7 @@ function ChatPage() {
   const conversationEndRef = useRef(null);
   const abortStreamRef = useRef(null);
   const textareaRef = useRef(null);
+  const streamingMessageRef = useRef(''); // Track accumulated message to avoid stale closure
 
   // --- Fetch Models Effect ---
   useEffect(() => {
@@ -205,6 +206,7 @@ function ChatPage() {
     // Start streaming
     setIsStreaming(true);
     setCurrentStreamingMessage('');
+    streamingMessageRef.current = ''; // Clear the ref for new stream
 
     try {
       let abortFn;
@@ -229,7 +231,8 @@ function ChatPage() {
           conversationHistory,
           // onToken callback
           (token) => {
-            setCurrentStreamingMessage(prev => prev + token);
+            streamingMessageRef.current += token; // Update ref
+            setCurrentStreamingMessage(prev => prev + token); // Update state for UI
           },
           // onComplete callback
           () => {
@@ -265,7 +268,8 @@ function ChatPage() {
           conversationHistory,
           // onToken callback
           (token) => {
-            setCurrentStreamingMessage(prev => prev + token);
+            streamingMessageRef.current += token; // Update ref
+            setCurrentStreamingMessage(prev => prev + token); // Update state for UI
           },
           // onComplete callback
           () => {
@@ -292,7 +296,8 @@ function ChatPage() {
           user.id,
           // onToken callback
           (token) => {
-            setCurrentStreamingMessage(prev => prev + token);
+            streamingMessageRef.current += token; // Update ref
+            setCurrentStreamingMessage(prev => prev + token); // Update state for UI
           },
           // onComplete callback
           () => {
@@ -320,16 +325,21 @@ function ChatPage() {
   const handleStreamComplete = () => {
     console.log('[CHAT] Finalizing streamed message');
     
+    // Use ref value instead of state to avoid stale closure
+    const finalContent = streamingMessageRef.current || '(No response)';
+    console.log('[CHAT] Final message length:', finalContent.length);
+    
     const assistantMessage = {
       id: `assistant-${Date.now()}`,
       role: 'assistant',
-      content: currentStreamingMessage || '(No response)',
+      content: finalContent,
       timestamp: new Date(),
       model: selectedModel?.name || 'Unknown',
     };
 
     setMessages(prev => [...prev, assistantMessage]);
     setCurrentStreamingMessage('');
+    streamingMessageRef.current = ''; // Clear the ref
     setIsStreaming(false);
     abortStreamRef.current = null;
   };
@@ -348,6 +358,7 @@ function ChatPage() {
 
     setMessages(prev => [...prev, errorMessage]);
     setCurrentStreamingMessage('');
+    streamingMessageRef.current = ''; // Clear the ref
     setIsStreaming(false);
     setStreamError(error);
     abortStreamRef.current = null;
@@ -360,12 +371,13 @@ function ChatPage() {
     if (abortStreamRef.current) {
       abortStreamRef.current();
       
-      // Finalize partial message
-      if (currentStreamingMessage) {
+      // Finalize partial message using ref to avoid stale closure
+      const partialContent = streamingMessageRef.current;
+      if (partialContent) {
         const partialMessage = {
           id: `assistant-${Date.now()}`,
           role: 'assistant',
-          content: currentStreamingMessage + ' (stopped)',
+          content: partialContent + ' (stopped)',
           timestamp: new Date(),
           model: selectedModel?.name || 'Unknown',
         };
@@ -373,6 +385,7 @@ function ChatPage() {
       }
       
       setCurrentStreamingMessage('');
+      streamingMessageRef.current = ''; // Clear the ref
       setIsStreaming(false);
       abortStreamRef.current = null;
     }

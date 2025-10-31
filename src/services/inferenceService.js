@@ -109,15 +109,11 @@ export async function streamInference(modelId, prompt, userId, onToken, onComple
           if (data.done === true || data.complete === true || data.finished === true) {
             console.log('[INFERENCE] Received completion signal', { tokenCount });
             
-            // Set flag immediately
+            // Set flag and call onComplete
             streamFinishedBySignal = true;
-            
-            // Add delay to ensure all React state updates have processed
-            setTimeout(() => {
-              if (onComplete) {
-                onComplete();
-              }
-            }, 100);
+            if (onComplete) {
+              onComplete();
+            }
             
             break; // Exit the inner loop immediately
           }
@@ -158,11 +154,8 @@ export async function streamInference(modelId, prompt, userId, onToken, onComple
         }
         
         // Call onComplete only if the signal wasn't received in the last chunk
-        // Add delay to ensure all React state updates have processed
         if (!streamFinishedBySignal && onComplete) {
-            setTimeout(() => {
-              onComplete();
-            }, 100);
+            onComplete();
         }
 
         break; // Exit the outer while (true) loop

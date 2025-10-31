@@ -114,7 +114,7 @@ pub fn check_petals_installed() -> bool {
 
 #[cfg(target_os = "macos")]
 pub fn install_petals_macos() -> Result<(), String> {
-    println!("[MACOS] Installing Petals...");
+    println!("[MACOS] Installing Petals and dependencies for GPU sharing...");
     
     // Find python3 executable
     let python_paths = vec![
@@ -128,6 +128,8 @@ pub fn install_petals_macos() -> Result<(), String> {
     
     println!("[MACOS] Using Python at: {}", python_cmd);
     
+    // Install Petals (this installs PyTorch and transformers too)
+    println!("[MACOS] Step 1/2: Installing Petals core...");
     let output = Command::new(&python_cmd)
         .arg("-m")
         .arg("pip")
@@ -139,10 +141,55 @@ pub fn install_petals_macos() -> Result<(), String> {
     
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Petals installation failed: {}", stderr));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!("Petals installation failed:\nSTDERR: {}\nSTDOUT: {}", stderr, stdout));
     }
     
-    println!("[MACOS] Petals installed successfully");
+    println!("[MACOS] Petals core installed successfully");
+    
+    // Install additional dependencies required for GPU sharing (hosting models)
+    // These are required by run_petals_seeder.py but not by run_petals_inference.py
+    println!("[MACOS] Step 2/2: Installing GPU sharing dependencies (peft, accelerate)...");
+    let deps_output = Command::new(&python_cmd)
+        .arg("-m")
+        .arg("pip")
+        .arg("install")
+        .arg("--upgrade")
+        .arg("peft")
+        .arg("accelerate")
+        .output()
+        .map_err(|e| format!("Failed to install dependencies: {}", e))?;
+    
+    if !deps_output.status.success() {
+        let stderr = String::from_utf8_lossy(&deps_output.stderr);
+        let stdout = String::from_utf8_lossy(&deps_output.stdout);
+        println!("[MACOS] Warning: Some dependencies failed to install: {}", stderr);
+        // Don't fail here - peft/accelerate might already be installed via Petals
+    } else {
+        println!("[MACOS] GPU sharing dependencies installed successfully");
+    }
+    
+    // Verify installation
+    println!("[MACOS] Verifying complete installation...");
+    let verify_output = Command::new(&python_cmd)
+        .arg("-c")
+        .arg("import petals; import torch; import peft; import accelerate; print('all_ok')")
+        .output()
+        .map_err(|e| format!("Failed to verify installation: {}", e))?;
+    
+    let verify_result = String::from_utf8_lossy(&verify_output.stdout);
+    if verify_result.trim() == "all_ok" {
+        println!("[MACOS] All dependencies verified successfully");
+    } else {
+        println!("[MACOS] Warning: Some dependencies may not be fully installed");
+        println!("[MACOS] Verification output: {}", verify_result);
+        let stderr = String::from_utf8_lossy(&verify_output.stderr);
+        if !stderr.is_empty() {
+            println!("[MACOS] Verification errors: {}", stderr);
+        }
+    }
+    
+    println!("[MACOS] Petals installation completed");
     Ok(())
 }
 

@@ -362,40 +362,84 @@ pub async fn start_petals_seeder(
         }
         
         // CRITICAL: Also capture stderr for error messages on macOS
+        // This captures Python tracebacks and error messages
         if let Some(stderr) = child.stderr.take() {
             let logs = state.seeder_logs.clone();
             let app_handle = app.clone();
             thread::spawn(move || {
                 let reader = BufReader::new(stderr);
+                let mut error_buffer = Vec::new(); // Buffer to accumulate multi-line errors
+                let mut in_traceback = false;
+                
                 for line in reader.lines() {
                     if let Ok(line) = line {
                         println!("[PETALS-ERR-MACOS] {}", line);
                         
+                        // Detect start of Python traceback
+                        if line.contains("Traceback (most recent call last):") {
+                            in_traceback = true;
+                            error_buffer.clear();
+                            error_buffer.push(line.clone());
+                        } else if in_traceback {
+                            error_buffer.push(line.clone());
+                            
+                            // Detect end of traceback (usually an exception line without indentation)
+                            if !line.starts_with("  ") && !line.starts_with("\t") && 
+                               (line.contains("Error:") || line.contains("Exception:") || 
+                                line.contains("Error ") || line.ends_with("Error")) {
+                                // Emit the full traceback as one error
+                                let full_error = error_buffer.join("\n");
+                                println!("[PETALS-FULL-ERROR-MACOS]\n{}\n[END-ERROR]", full_error);
+                                
+                                let _ = app_handle.emit("petals_error", format!(
+                                    "Python Error on macOS:\n\n{}\n\nPlease check if all dependencies are installed correctly.",
+                                    full_error
+                                ));
+                                
+                                in_traceback = false;
+                                error_buffer.clear();
+                            }
+                        }
+                        
                         // Emit all stderr output to UI for visibility
-                        let _ = app_handle.emit("petals_log", format!("[STDERR] {}", line));
+                        let formatted_line = format!("[STDERR] {}", line);
+                        let _ = app_handle.emit("petals_log", formatted_line.clone());
                         
                         // Store in logs
                         {
                             let mut logs_guard = logs.lock().unwrap();
-                            logs_guard.push(format!("[STDERR] {}", line));
-                            if logs_guard.len() > 200 {
+                            logs_guard.push(formatted_line);
+                            if logs_guard.len() > 500 {  // Increased from 200 to capture full tracebacks
                                 logs_guard.remove(0);
                             }
                         }
                         
-                        // Detect critical errors
-                        if line.contains("Error") || line.contains("ERROR") || line.contains("Failed") || line.contains("Traceback") {
-                            // Special handling for 401 errors (time sync issues)
-                            if line.contains("401") || line.contains("Unauthorized") {
-                                let _ = app_handle.emit("petals_error", format!(
-                                    "Authentication Error: {}. This may be due to system time being out of sync. Try restarting the app or manually syncing time in System Preferences > Date & Time.",
-                                    line
-                                ));
-                            } else {
-                                let _ = app_handle.emit("petals_error", format!("macOS Error: {}", line));
-                            }
+                        // Detect critical single-line errors (not part of traceback)
+                        if !in_traceback && (line.contains("ImportError") || line.contains("ModuleNotFoundError")) {
+                            let _ = app_handle.emit("petals_error", format!(
+                                "Import Error on macOS: {}\n\nMissing Python dependencies. Please ensure peft and accelerate are installed:\npip install peft accelerate",
+                                line
+                            ));
+                        } else if !in_traceback && (line.contains("401") || line.contains("Unauthorized")) {
+                            let _ = app_handle.emit("petals_error", format!(
+                                "Authentication Error: {}. This may be due to system time being out of sync. Try restarting the app or manually syncing time in System Preferences > Date & Time.",
+                                line
+                            ));
+                        } else if !in_traceback && line.contains("CUDA") {
+                            // CUDA errors on macOS are expected (no NVIDIA GPU)
+                            println!("[PETALS-MACOS] CUDA-related message (expected on Mac): {}", line);
                         }
                     }
+                }
+                
+                // If we still have an incomplete error buffer at end of stream, emit it
+                if !error_buffer.is_empty() {
+                    let full_error = error_buffer.join("\n");
+                    println!("[PETALS-INCOMPLETE-ERROR-MACOS]\n{}\n[END-ERROR]", full_error);
+                    let _ = app_handle.emit("petals_error", format!(
+                        "Incomplete Error on macOS:\n\n{}\n\nThe process may have terminated unexpectedly.",
+                        full_error
+                    ));
                 }
             });
         }

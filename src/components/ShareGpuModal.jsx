@@ -1281,28 +1281,57 @@ function ShareGpuModal({ isOpen, onClose }) {
                   Petals Failed to Start
                 </h4>
                 <p style={{ marginBottom: '0.5rem', fontSize: '0.9em' }}>
-                  {seederError.includes('device') ? 'The model configuration is incompatible. This may be because:' :
+                  {seederError.includes('ImportError') || seederError.includes('ModuleNotFoundError') ? 
+                    'Missing Python dependencies. Please reinstall by clicking "Share GPU" again.' :
+                   seederError.includes('device') ? 'The model configuration is incompatible. This may be because:' :
                    seederError.includes('CUDA') || seederError.includes('GPU') ? 'GPU error occurred:' :
+                   seederError.includes('Traceback') ? 'Python Error (see full traceback below):' :
                    'An error occurred:'}
                 </p>
                 <div style={{
-                  backgroundColor: 'hsl(var(--background))',
-                  padding: '0.5rem',
-                  borderRadius: '4px',
-                  fontSize: '0.75em',
-                  fontFamily: 'monospace',
-                  color: 'hsl(var(--foreground))',
-                  maxHeight: '100px',
+                  backgroundColor: '#1e1e1e',
+                  padding: '0.75rem',
+                  borderRadius: '6px',
+                  fontSize: '0.7em',
+                  fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                  color: '#f8f8f2',
+                  maxHeight: '300px',
                   overflow: 'auto',
-                  marginBottom: '0.5rem',
-                  border: '1px solid hsl(var(--border))'
+                  marginBottom: '0.75rem',
+                  border: '2px solid #dc3545',
+                  whiteSpace: 'pre-wrap',
+                  lineHeight: '1.5',
+                  boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.3)'
                 }}>
                   {seederError}
                 </div>
-                {!hasNvidiaGpu && seederError.toLowerCase().includes('cuda') && (
+                {isMacOS && seederError.includes('ImportError') && (
+                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9em', fontStyle: 'italic', color: '#dc3545' }}>
+                    💡 <strong>macOS Fix:</strong> Try clicking "Share GPU" again to reinstall dependencies, or manually run:<br/>
+                    <code style={{ backgroundColor: '#1e1e1e', padding: '0.2rem 0.4rem', borderRadius: '3px', fontSize: '0.9em' }}>
+                      pip3 install peft accelerate
+                    </code>
+                  </p>
+                )}
+                {!hasNvidiaGpu && seederError.toLowerCase().includes('cuda') && !seederError.includes('ImportError') && (
                   <p style={{ margin: '0', fontSize: '0.9em', fontStyle: 'italic' }}>
                     💡 Note: You're running in CPU mode. Your system has {hardwareInfo?.gpu_info?.[0] || 'a non-NVIDIA GPU'}. Some CUDA-related errors are expected.
                   </p>
+                )}
+                {seederError.includes('Traceback') && (
+                  <details style={{ marginTop: '0.5rem', fontSize: '0.85em' }}>
+                    <summary style={{ cursor: 'pointer', color: '#1a73e8', fontWeight: '500' }}>
+                      💡 How to fix this error
+                    </summary>
+                    <div style={{ marginTop: '0.5rem', padding: '0.5rem', backgroundColor: '#f8f9fa', borderRadius: '4px' }}>
+                      <ol style={{ margin: '0', paddingLeft: '1.5rem' }}>
+                        <li>Try clicking "Share GPU" again to reinstall dependencies</li>
+                        <li>If the error persists, check that Homebrew is up to date: <code>brew update</code></li>
+                        <li>Ensure Python 3.10+ is installed: <code>python3 --version</code></li>
+                        <li>Manually reinstall Petals: <code>pip3 install --upgrade git+https://github.com/bigscience-workshop/petals peft accelerate</code></li>
+                      </ol>
+                    </div>
+                  </details>
                 )}
               </div>
             )}

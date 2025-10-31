@@ -119,8 +119,8 @@ def main():
     logger.info("="*60)
     
     # Auto-detect device or validate specific device
+    # (torch is already imported in verification section above)
     try:
-        import torch
         import platform
         
         if args.device == "auto":
@@ -168,6 +168,47 @@ def main():
         # Similar to the bitsandbytes solution from the commit
         os.environ["PYTHONDONTWRITEBYTECODE"] = "1"  # Prevent .pyc files that can cause re-imports
         os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"  # Disable telemetry
+        
+        # Verify critical imports BEFORE starting server
+        logger.info("="*60)
+        logger.info("VERIFYING DEPENDENCIES")
+        try:
+            import torch
+            logger.info("✓ PyTorch version: %s", torch.__version__)
+        except ImportError as e:
+            logger.error("✗ PyTorch not installed: %s", e)
+            logger.error("Please install PyTorch: pip install torch")
+            sys.exit(1)
+        
+        try:
+            import petals
+            logger.info("✓ Petals version: %s", petals.__version__)
+        except ImportError as e:
+            logger.error("✗ Petals not installed: %s", e)
+            logger.error("Please install Petals: pip install git+https://github.com/bigscience-workshop/petals")
+            sys.exit(1)
+        
+        # Check for GPU sharing specific dependencies
+        try:
+            import peft
+            logger.info("✓ peft installed (required for hosting models)")
+        except ImportError as e:
+            logger.error("✗ peft not installed: %s", e)
+            logger.error("peft is required for GPU sharing. Please install: pip install peft")
+            logger.error("(peft is needed to host model blocks, but not for inference-only)")
+            sys.exit(1)
+        
+        try:
+            import accelerate
+            logger.info("✓ accelerate installed (required for hosting models)")
+        except ImportError as e:
+            logger.error("✗ accelerate not installed: %s", e)
+            logger.error("accelerate is required for GPU sharing. Please install: pip install accelerate")
+            logger.error("(accelerate is needed to host model blocks, but not for inference-only)")
+            sys.exit(1)
+        
+        logger.info("✓ All dependencies verified successfully")
+        logger.info("="*60)
         
         # Set HuggingFace token if provided
         if args.hf_token:
@@ -308,19 +349,73 @@ def main():
     except KeyboardInterrupt:
         logger.info("Received shutdown signal (Ctrl+C)")
         logger.info("Shutting down Petals server...")
-    except (ImportError, KeyboardInterrupt, OSError) as e:
+    except ImportError as e:
         error_msg = str(e)
-        logger.error("Unexpected error running Petals server: %s", e, exc_info=True)
+        logger.error("=" * 60)
+        logger.error("IMPORT ERROR DETECTED")
+        logger.error("Failed to import required Python module: %s", e)
+        logger.error("Full traceback:", exc_info=True)
+        logger.error("=" * 60)
+        
+        # Provide specific guidance based on the missing module
+        if "peft" in error_msg.lower():
+            logger.error("Missing dependency: peft")
+            logger.error("SOLUTION: pip install peft")
+            logger.error("This is required for hosting model blocks (GPU sharing mode)")
+        elif "accelerate" in error_msg.lower():
+            logger.error("Missing dependency: accelerate")
+            logger.error("SOLUTION: pip install accelerate")
+            logger.error("This is required for hosting model blocks (GPU sharing mode)")
+        elif "transformers" in error_msg.lower():
+            logger.error("Missing dependency: transformers")
+            logger.error("SOLUTION: pip install transformers")
+            logger.error("This should have been installed with Petals")
+        elif "torch" in error_msg.lower():
+            logger.error("Missing dependency: PyTorch")
+            logger.error("SOLUTION: pip install torch")
+            logger.error("This should have been installed with Petals")
+        else:
+            logger.error("Please ensure all dependencies are installed:")
+            logger.error("pip install git+https://github.com/bigscience-workshop/petals peft accelerate")
+        
+        logger.error("=" * 60)
+        sys.exit(1)
+    except (KeyboardInterrupt, OSError) as e:
+        error_msg = str(e)
+        logger.error("=" * 60)
+        logger.error("RUNTIME ERROR DETECTED")
+        logger.error("Error: %s", e)
+        logger.error("Full traceback:", exc_info=True)
+        logger.error("=" * 60)
         
         # Provide helpful hints for common errors
         if "local time must be within" in error_msg:
-            logger.error("=" * 60)
             logger.error("TIME SYNC ERROR DETECTED")
             logger.error("Your system clock is out of sync with the Petals network.")
-            logger.error("SOLUTION: Restart the Torbiz app to resync WSL time.")
-            logger.error("(This error usually occurs after Windows sleep/hibernate)")
-            logger.error("=" * 60)
+            logger.error("SOLUTION (macOS): Go to System Preferences > Date & Time > Enable 'Set time automatically'")
+            logger.error("SOLUTION (Windows/WSL): Restart the Torbiz app to resync WSL time.")
+            logger.error("(This error usually occurs after sleep/hibernate)")
+        elif "connection" in error_msg.lower() or "network" in error_msg.lower():
+            logger.error("NETWORK ERROR DETECTED")
+            logger.error("Failed to connect to Petals DHT network.")
+            logger.error("Please check your internet connection and firewall settings.")
+        elif "permission" in error_msg.lower():
+            logger.error("PERMISSION ERROR DETECTED")
+            logger.error("Insufficient permissions to access required resources.")
+            logger.error("Try running with appropriate permissions or check file access.")
         
+        logger.error("=" * 60)
+        sys.exit(1)
+    except Exception as e:
+        # Catch-all for any unexpected errors
+        logger.error("=" * 60)
+        logger.error("UNEXPECTED ERROR")
+        logger.error("An unexpected error occurred: %s", e)
+        logger.error("Error type: %s", type(e).__name__)
+        logger.error("Full traceback:", exc_info=True)
+        logger.error("=" * 60)
+        logger.error("Please report this error to the Torbiz team with the full log above.")
+        logger.error("=" * 60)
         sys.exit(1)
     finally:
         # Restore original argv

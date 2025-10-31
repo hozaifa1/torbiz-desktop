@@ -1318,45 +1318,43 @@ function ShareGpuModal({ isOpen, onClose }) {
                     Hosting {selectedModelInfo.name} with Metal GPU acceleration
                   </p>
                 )}
-    
-    {/* *** ADD THIS: Logs button *** */}
-    <button
-      onClick={fetchSeederLogs}
-      style={{
-        marginTop: '0.5rem',
-        padding: '0.4rem 0.8rem',
-        fontSize: '0.85em',
-        backgroundColor: '#34a853',
-        color: 'white',
-        border: 'none',
-        borderRadius: '4px',
-        cursor: 'pointer'
-      }}
-    >
-      {showLogs ? 'Refresh Logs' : 'View Seeder Logs'}
-    </button>
-    
-    {showLogs && seederLogs.length > 0 && (
-      <div className="log-display">
-        {seederLogs.slice(-30).map((log, idx) => {
-          // Color-code logs based on content
-          let logClass = 'log-line';
-          if (log.includes('[INFO]') || log.includes('✓')) logClass += ' info';
-          if (log.includes('[WARN]')) logClass += ' warning';
-          if (log.includes('[ERROR]')) logClass += ' error';
-          if (log.includes('Successfully') || log.includes('Loaded')) logClass += ' success';
-          
-          return (
-            <div key={idx} className={logClass}>
-            {log}
-          </div>
-          );
-        })}
-        <div ref={logsEndRef} />
-      </div>
-    )}
-  </div>
-)}
+                
+                {/* Logs button */}
+                <button
+                  onClick={fetchSeederLogs}
+                  style={{
+                    marginTop: '0.5rem',
+                    padding: '0.4rem 0.8rem',
+                    fontSize: '0.85em',
+                    backgroundColor: '#34a853',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {showLogs ? 'Refresh Logs' : 'View Seeder Logs'}
+                </button>
+                
+                {showLogs && seederLogs.length > 0 && (
+                  <div className="log-display">
+                    {seederLogs.slice(-30).map((log, idx) => {
+                      // Color-code logs based on content
+                      let logClass = 'log-line';
+                      if (log.includes('[INFO]') || log.includes('✓')) logClass += ' info';
+                      if (log.includes('[WARN]')) logClass += ' warning';
+                      if (log.includes('[ERROR]')) logClass += ' error';
+                      if (log.includes('Successfully') || log.includes('Loaded')) logClass += ' success';
+                      
+                      return (
+                        <div key={idx} className={logClass}>
+                          {log}
+                        </div>
+                      );
+                    })}
+                    <div ref={logsEndRef} />
+                  </div>
+                )}
               </div>
             )}
             <button 

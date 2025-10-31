@@ -120,26 +120,44 @@ function canHostOnCpu(totalRAMGB, model) {
 function calculateCpuHostableShards(totalRAMGB, model) {
   if (!totalRAMGB || totalRAMGB <= 0) return 0;
   
-  // More reasonable approach: allow up to 60% of available RAM for model blocks
-  // Reserve 2GB for OS and 1GB for Petals overhead
-  const availableRAM = Math.max(0, totalRAMGB - 3.0);
-  const maxRamBudget = availableRAM * 0.6; // Use up to 60% of available RAM
+  // Conservative approach matching backend logic:
+  // Reserve 2GB for OS stability, use 50% of remaining RAM
+  const reserved_gb = 2.0;
+  const usableRam = Math.max(0.5, totalRAMGB - reserved_gb);
+  const maxRamBudget = usableRam * 0.5; // Use 50% of usable RAM
   
-  // Estimate RAM per block based on model size
-  // Small models (~1-3GB): ~100-150MB per block
-  // Medium models (7-8GB): ~250-300MB per block
-  const estimatedRamPerBlock = model.totalModelSize < 4 
-    ? 0.15  // 150MB for small models
-    : model.totalModelSize < 10 
-      ? 0.25  // 250MB for medium models
-      : 0.4;  // 400MB for larger models
+  // Model-specific block size estimates (matching backend logic)
+  let blockSizeGB;
+  const modelName = model.id.toLowerCase();
+  
+  if (modelName.includes("tinyllama") || modelName.includes("1.1b")) {
+    // TinyLlama: ~80MB per block
+    blockSizeGB = 0.08;
+  } else if (modelName.includes("gemma-2-2b") || modelName.includes("2b")) {
+    // Gemma 2B: ~100MB per block
+    blockSizeGB = 0.10;
+  } else if (modelName.includes("phi-3") || modelName.includes("3.8b")) {
+    // Phi-3: ~120MB per block
+    blockSizeGB = 0.12;
+  } else if (model.totalModelSize < 4) {
+    // Small models: ~100MB per block
+    blockSizeGB = 0.10;
+  } else if (model.totalModelSize < 10) {
+    // Medium models: ~150MB per block
+    blockSizeGB = 0.15;
+  } else {
+    // Larger models: ~200MB per block
+    blockSizeGB = 0.20;
+  }
   
   // Calculate how many blocks can fit
-  const hostableShards = Math.floor(maxRamBudget / estimatedRamPerBlock);
+  const hostableShards = Math.floor(maxRamBudget / blockSizeGB);
   
-  // Ensure at least 1, but don't exceed model total
-  // Remove the artificial cap of 8 - let user host as much as RAM allows
-  return Math.max(1, Math.min(hostableShards, model.totalShards));
+  // Cap at reasonable maximum based on RAM
+  const maxBlocks = totalRAMGB <= 8 ? 20 : 30;
+  
+  // Ensure at least 1, don't exceed cap or model total
+  return Math.max(1, Math.min(hostableShards, maxBlocks, model.totalShards));
 }
 
 // Helper to extract VRAM from GPU info string

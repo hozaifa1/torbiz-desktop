@@ -120,71 +120,36 @@ function canHostOnCpu(totalRAMGB, model) {
 function calculateCpuHostableShards(totalRAMGB, model) {
   if (!totalRAMGB || totalRAMGB <= 0) return 0;
   
-  // REALISTIC memory allocation matching backend proven configurations
-  // Based on actual testing: 10 blocks crashes 8GB system, 5 blocks stable
+  // SIMPLE FIXED ALLOCATION - matches backend proven testing
+  // User tested: 5 blocks stable, 10 blocks crash on 8GB
+  // No complex calculations, just use what works
   
-  let reservedForOsApps, petalsOverhead, maxRamForBlocks;
+  let numBlocks;
   
-  if (totalRAMGB <= 8) {
-    // 8GB systems: Very conservative (tested)
-    reservedForOsApps = 4.5;  // Windows + apps + browser
-    petalsOverhead = 0.5;      // DHT, networking, buffers
-    maxRamForBlocks = Math.max(0.5, totalRAMGB - reservedForOsApps - petalsOverhead);
+  if (totalRAMGB <= 6) {
+    // Very small systems
+    numBlocks = 3;
+  } else if (totalRAMGB <= 8) {
+    // 8GB systems - TARGET: 6-7 blocks (above stable 5, below crash 10)
+    const modelName = model.id.toLowerCase();
+    if (modelName.includes("tinyllama") || modelName.includes("1.1b")) {
+      numBlocks = 7;  // TinyLlama is small, can do 7
+    } else {
+      numBlocks = 6;  // Other models, conservative 6
+    }
+  } else if (totalRAMGB <= 12) {
+    // 12GB systems
+    numBlocks = 10;
   } else if (totalRAMGB <= 16) {
-    // 16GB systems: Balanced
-    reservedForOsApps = 5.0;
-    petalsOverhead = 1.0;
-    maxRamForBlocks = Math.max(1.0, totalRAMGB - reservedForOsApps - petalsOverhead);
+    // 16GB systems
+    numBlocks = 14;
   } else {
-    // 32GB+ systems: Optimized
-    reservedForOsApps = 6.0;
-    petalsOverhead = 2.0;
-    maxRamForBlocks = Math.max(2.0, totalRAMGB - reservedForOsApps - petalsOverhead);
+    // 32GB+ systems
+    numBlocks = 22;
   }
   
-  // REALISTIC block size estimates: float32 + runtime overhead
-  // Based on actual memory profiling, not theoretical calculations
-  let blockSizeGB;
-  const modelName = model.id.toLowerCase();
-  
-  if (modelName.includes("tinyllama") || modelName.includes("1.1b")) {
-    // TinyLlama float32: 2.2GB / 22 = 100MB base + 100MB overhead = 200MB
-    blockSizeGB = 0.20;
-  } else if (modelName.includes("gemma-2-2b") || modelName.includes("2b")) {
-    // Gemma 2B float32: ~5GB / 26 = 190MB base + overhead = 250MB
-    blockSizeGB = 0.25;
-  } else if (modelName.includes("phi-3") || modelName.includes("3.8b")) {
-    // Phi-3 float32: ~7.6GB / 32 = 240MB base + overhead = 300MB
-    blockSizeGB = 0.30;
-  } else if (model.totalModelSize < 4) {
-    // Small models: default 200MB
-    blockSizeGB = 0.20;
-  } else if (model.totalModelSize < 10) {
-    // Medium models: 250MB
-    blockSizeGB = 0.25;
-  } else {
-    // Large models: 300MB
-    blockSizeGB = 0.30;
-  }
-  
-  // Calculate blocks
-  const hostableShards = Math.floor(maxRamForBlocks / blockSizeGB);
-  
-  // Hard safety caps based on proven stable configurations:
-  // 8GB: max 8 blocks (10 crashes, 5 stable, 8 is safe middle ground)
-  // 16GB: max 16 blocks
-  // 32GB+: max 30 blocks
-  let maxBlocks;
-  if (totalRAMGB <= 8) {
-    maxBlocks = 8;  // Proven safe through user testing
-  } else if (totalRAMGB <= 16) {
-    maxBlocks = 16;
-  } else {
-    maxBlocks = 30;
-  }
-  
-  // Ensure at least 1, don't exceed safety cap or model total
-  return Math.max(1, Math.min(hostableShards, maxBlocks, model.totalShards));
+  // Don't exceed model's total blocks
+  return Math.min(numBlocks, model.totalShards);
 }
 
 // Helper to extract VRAM from GPU info string

@@ -119,10 +119,8 @@ def main():
     logger.info("="*60)
     
     # Auto-detect device or validate specific device
-    # (torch is already imported in verification section above)
+    # (torch and platform are already imported in verification section above)
     try:
-        import platform
-        
         if args.device == "auto":
             # Auto-detect best device
             if torch.cuda.is_available():
@@ -150,8 +148,8 @@ def main():
         
         logger.info("Final Device: %s", args.device)
         
-    except ImportError:
-        logger.warning("PyTorch not found, defaulting to CPU")
+    except Exception as e:
+        logger.warning("Error during device detection: %s, defaulting to CPU", e)
         args.device = "cpu"
     
     logger.info("Initializing Petals Server...")
@@ -174,7 +172,9 @@ def main():
         logger.info("VERIFYING DEPENDENCIES")
         try:
             import torch
+            import platform
             logger.info("✓ PyTorch version: %s", torch.__version__)
+            logger.info("✓ Platform: %s", platform.system())
         except ImportError as e:
             logger.error("✗ PyTorch not installed: %s", e)
             logger.error("Please install PyTorch: pip install torch")

@@ -35,6 +35,10 @@ import signal
 import sys
 import os
 import tempfile
+import platform
+
+# Import torch and other heavy libraries AFTER bitsandbytes mock
+import torch
 
 # Global flag for graceful shutdown
 shutdown_requested = False
@@ -168,17 +172,11 @@ def main():
         os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"  # Disable telemetry
         
         # Verify critical imports BEFORE starting server
+        # torch and platform are already imported at the top of the file
         logger.info("="*60)
         logger.info("VERIFYING DEPENDENCIES")
-        try:
-            import torch
-            import platform
-            logger.info("✓ PyTorch version: %s", torch.__version__)
-            logger.info("✓ Platform: %s", platform.system())
-        except ImportError as e:
-            logger.error("✗ PyTorch not installed: %s", e)
-            logger.error("Please install PyTorch: pip install torch")
-            sys.exit(1)
+        logger.info("✓ PyTorch version: %s", torch.__version__)
+        logger.info("✓ Platform: %s", platform.system())
         
         try:
             import petals

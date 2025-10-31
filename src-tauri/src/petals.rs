@@ -415,7 +415,10 @@ pub async fn start_petals_seeder(
                         }
                         
                         // Detect critical single-line errors (not part of traceback)
-                        if !in_traceback && (line.contains("ImportError") || line.contains("ModuleNotFoundError")) {
+                        if !in_traceback && line.contains("[ERROR]") {
+                            // Emit ANY error line to UI, not just specific patterns
+                            let _ = app_handle.emit("petals_error", line.clone());
+                        } else if !in_traceback && (line.contains("ImportError") || line.contains("ModuleNotFoundError")) {
                             let _ = app_handle.emit("petals_error", format!(
                                 "Import Error on macOS: {}\n\nMissing Python dependencies. Please ensure peft and accelerate are installed:\npip install peft accelerate",
                                 line

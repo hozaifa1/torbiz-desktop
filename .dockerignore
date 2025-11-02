@@ -1,0 +1,41 @@
+# Dockerignore for Torbiz macOS container
+
+# Build artifacts
+target/
+dist/
+build/
+*.exe
+*.app
+
+# Dependencies
+node_modules/
+.npm/
+.yarn/
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Environment
+.env
+.env.local
+
+# Documentation
+*.md
+!README.md
+

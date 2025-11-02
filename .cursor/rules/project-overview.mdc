@@ -27,7 +27,11 @@ Always use "..."(double quotes) for string, especially in python (.py) files and
 The GPU sharing from NVIDIA GPU is working perfectly well. So YOU MUST NOT break it, or make any changes to it.
 
 Before making any changes to the codebase, always execute the following command to ensure you are working on the latest version:
+
 git pull
+
+Note this when you do the git pull on my terminal:
+The token '&&' is not a valid statement separator in this version
 
 After you have made and verified your changes, execute these commands to add, commit, and push your changes:
 git add .

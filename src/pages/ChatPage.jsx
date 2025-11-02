@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import {
     ChevronLeft, ChevronRight, Share2, ChevronDown,
     MessageSquarePlus, Paperclip, SendHorizontal, Loader, AlertTriangle, StopCircle,
-    User, Settings, Network, Search, MessageCircle, X, Image as ImageIcon
+    User, Settings, Network, Search, MessageCircle, X, Image as ImageIcon, RefreshCw, Trash2, ArrowLeft
 } from 'lucide-react';
 
 import HardwareInfoDisplay from '../components/HardwareInfoDisplay';
@@ -13,7 +13,7 @@ import api from '../services/api';
 import { streamInference, createInference } from '../services/inferenceService';
 import { runDirectInference } from '../services/directInferenceService';
 import { runLocalInference } from '../services/localInferenceService';
-import { streamDeepResearch, getDeepResearchByClient } from '../services/deepResearchService';
+import { streamDeepResearch, getDeepResearchByClient, getDeepResearchById, regenerateDeepResearch, deleteDeepResearch } from '../services/deepResearchService';
 
 // --- Placeholder Data ---
 const chatHistory = [
@@ -43,6 +43,8 @@ function ChatPage() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const imageInputRef = useRef(null);
+  const [selectedResearch, setSelectedResearch] = useState(null);
+  const [isViewingResearch, setIsViewingResearch] = useState(false);
   
   // Testing mode - direct Petals inference
   const [isTestingMode, setIsTestingMode] = useState(false);
@@ -205,9 +207,103 @@ function ChatPage() {
     setInputValue('');
     setStreamError(null);
     handleRemoveImage();
+    setSelectedResearch(null);
+    setIsViewingResearch(false);
     console.log(`[MODE] Switched to ${newMode} mode`);
   };
 
+  // Handle viewing a research item from history
+  const handleViewResearch = async (researchId) => {
+    try {
+      console.log('[RESEARCH] Loading research:', researchId);
+      const research = await getDeepResearchById(researchId);
+      setSelectedResearch(research);
+      setIsViewingResearch(true);
+      console.log('[RESEARCH] Loaded successfully');
+    } catch (error) {
+      console.error('[RESEARCH] Failed to load:', error);
+      setStreamError('Failed to load research. Please try again.');
+    }
+  };
+
+  // Handle going back from viewing research
+  const handleBackToResearchList = () => {
+    setSelectedResearch(null);
+    setIsViewingResearch(false);
+    setStreamError(null);
+  };
+
+  // Handle regenerating research answer
+  const handleRegenerateResearch = async () => {
+    if (!selectedResearch) return;
+
+    console.log('[RESEARCH] Regenerating research:', selectedResearch.id);
+    setIsStreaming(true);
+    setStreamError(null);
+
+    // Update the selected research to clear the answer
+    setSelectedResearch(prev => ({ ...prev, answer_text: '' }));
+
+    let accumulatedAnswer = '';
+
+    try {
+      const abortFn = await regenerateDeepResearch(
+        selectedResearch.id,
+        // onToken callback
+        (token) => {
+          accumulatedAnswer += token;
+          setSelectedResearch(prev => ({ ...prev, answer_text: accumulatedAnswer }));
+        },
+        // onComplete callback
+        () => {
+          console.log('[RESEARCH] Regeneration completed');
+          setIsStreaming(false);
+          // Refresh research history
+          getDeepResearchByClient(user.id).then(history => {
+            setResearchHistory(history);
+          }).catch(err => console.error('[RESEARCH] Failed to refresh history:', err));
+        },
+        // onError callback
+        (error) => {
+          console.error('[RESEARCH] Regeneration error:', error);
+          setStreamError(error);
+          setIsStreaming(false);
+        }
+      );
+
+      abortStreamRef.current = abortFn;
+    } catch (error) {
+      console.error('[RESEARCH] Failed to start regeneration:', error);
+      setStreamError(error.message || 'Failed to regenerate research');
+      setIsStreaming(false);
+    }
+  };
+
+  // Handle deleting research
+  const handleDeleteResearch = async (researchId) => {
+    if (!confirm('Are you sure you want to delete this research?')) {
+      return;
+    }
+
+    try {
+      console.log('[RESEARCH] Deleting research:', researchId);
+      await deleteDeepResearch(researchId);
+      
+      // Refresh history
+      const history = await getDeepResearchByClient(user.id);
+      setResearchHistory(history);
+      
+      // If we're viewing the deleted research, go back
+      if (selectedResearch?.id === researchId) {
+        handleBackToResearchList();
+      }
+      
+      console.log('[RESEARCH] Deleted successfully');
+    } catch (error) {
+      console.error('[RESEARCH] Failed to delete:', error);
+      setStreamError('Failed to delete research. Please try again.');
+    }
+  };
   // Handle deep research send
   const handleDeepResearchSend = async () => {
     const trimmedInput = inputValue.trim();
@@ -674,6 +770,8 @@ function ChatPage() {
     setInputValue('');
     setStreamError(null);
     handleRemoveImage();
+    setSelectedResearch(null);
+    setIsViewingResearch(false);
     console.log(`[${appMode.toUpperCase()}] Started new conversation`);
   };
 
@@ -750,14 +848,45 @@ function ChatPage() {
                 researchHistory.map(research => (
                   <li 
                     key={research.id} 
-                    style={{ cursor: 'pointer', fontSize: '0.9em' }}
+                    style={{ 
+                      cursor: 'pointer', 
+                      fontSize: '0.9em',
+                      backgroundColor: selectedResearch?.id === research.id ? 'hsl(var(--accent))' : 'transparent',
+                      padding: '0.75rem',
+                      margin: '0.25rem 0',
+                      borderRadius: 'var(--radius)',
+                      transition: 'var(--transition-smooth)',
+                      position: 'relative'
+                    }}
                     title={research.question_text}
+                    onClick={() => handleViewResearch(research.id)}
                   >
-                    {research.question_text.length > 50 
-                      ? research.question_text.substring(0, 50) + '...' 
-                      : research.question_text}
-                    <div style={{ fontSize: '0.75em', color: 'hsl(var(--muted-foreground))', marginTop: '0.25rem' }}>
-                      {new Date(research.created_at).toLocaleDateString()}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                      <div style={{ flex: 1, overflow: 'hidden' }}>
+                        {research.question_text.length > 50 
+                          ? research.question_text.substring(0, 50) + '...' 
+                          : research.question_text}
+                        <div style={{ fontSize: '0.75em', color: 'hsl(var(--muted-foreground))', marginTop: '0.25rem' }}>
+                          {new Date(research.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteResearch(research.id);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          cursor: 'pointer',
+                          padding: '0.25rem',
+                          color: 'hsl(var(--muted-foreground))',
+                          transition: 'var(--transition-smooth)',
+                        }}
+                        title="Delete research"
+                      >
+                        <Trash2 size={14} />
+                      </button>
                     </div>
                   </li>
                 ))
@@ -922,7 +1051,7 @@ function ChatPage() {
                   : 'Enable Local Mode (TEST) - Uses TinyLlama directly, bypasses Petals DHT'
               }
             >
-              <span style={{ fontSize: '1.2em' }}>??</span>
+              <span style={{ fontSize: '1.2em' }}>💻</span>
               <span>
                 {isLocalMode ? 'Local Mode: ON' : 'Local Mode (TEST)'}
               </span>
@@ -1120,12 +1249,153 @@ function ChatPage() {
 
         {/* Conversation Area */}
         <div className="conversation-area">
+          {/* Research View Mode */}
+          {appMode === 'research' && isViewingResearch && selectedResearch ? (
+            <div style={{ padding: '2rem', maxWidth: '900px', margin: '0 auto' }}>
+              {/* Back button */}
+              <button
+                onClick={handleBackToResearchList}
+                className="research-view-back-btn"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.5rem 1rem',
+                  marginBottom: '1.5rem',
+                  backgroundColor: 'hsl(var(--secondary))',
+                  border: '1px solid hsl(var(--border))',
+                  borderRadius: 'var(--radius)',
+                  cursor: 'pointer',
+                  color: 'hsl(var(--foreground))',
+                  fontSize: '0.9rem',
+                  transition: 'var(--transition-smooth)',
+                }}
+              >
+                <ArrowLeft size={16} />
+                Back to Research List
+              </button>
+
+              {/* Research Question */}
+              <div className="research-question-card" style={{
+                padding: '1.5rem',
+                backgroundColor: 'hsl(var(--card))',
+                border: '2px solid hsl(var(--primary))',
+                borderRadius: 'var(--radius)',
+                marginBottom: '1.5rem',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                  <h2 style={{ margin: 0, fontSize: '1.25rem', color: 'hsl(var(--primary))' }}>
+                    🔍 Research Question
+                  </h2>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <button
+                      onClick={handleRegenerateResearch}
+                      disabled={isStreaming}
+                      className="research-regenerate-btn"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.5rem 1rem',
+                        backgroundColor: isStreaming ? 'hsl(var(--secondary))' : 'hsl(var(--primary))',
+                        color: isStreaming ? 'hsl(var(--muted-foreground))' : 'hsl(var(--primary-foreground))',
+                        border: 'none',
+                        borderRadius: 'var(--radius)',
+                        cursor: isStreaming ? 'not-allowed' : 'pointer',
+                        fontSize: '0.85rem',
+                        transition: 'var(--transition-smooth)',
+                      }}
+                      title="Regenerate answer"
+                    >
+                      <RefreshCw size={14} className={isStreaming ? 'spinner' : ''} />
+                      {isStreaming ? 'Regenerating...' : 'Regenerate'}
+                    </button>
+                  </div>
+                </div>
+                <p style={{ 
+                  margin: 0, 
+                  fontSize: '1.1rem', 
+                  lineHeight: 1.6,
+                  wordBreak: 'break-word',
+                  overflowWrap: 'break-word'
+                }}>
+                  {selectedResearch.question_text}
+                </p>
+                {selectedResearch.image && (
+                  <img 
+                    src={selectedResearch.image} 
+                    alt="Research context" 
+                    style={{ 
+                      maxWidth: '400px', 
+                      maxHeight: '400px', 
+                      borderRadius: '8px', 
+                      marginTop: '1rem',
+                      border: '1px solid hsl(var(--border))'
+                    }} 
+                  />
+                )}
+                <div style={{ 
+                  fontSize: '0.8rem', 
+                  color: 'hsl(var(--muted-foreground))', 
+                  marginTop: '1rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <span>Asked on {new Date(selectedResearch.created_at).toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* Research Answer */}
+              <div className="research-answer-card" style={{
+                padding: '1.5rem',
+                backgroundColor: 'hsl(var(--card))',
+                border: '1px solid hsl(var(--border))',
+                borderRadius: 'var(--radius)',
+                minHeight: '300px',
+              }}>
+                <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', color: 'hsl(var(--foreground))' }}>
+                  🤖 AI Research Answer
+                </h3>
+                {isStreaming ? (
+                  <div>
+                    <p style={{ 
+                      margin: 0, 
+                      lineHeight: 1.8,
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      overflowWrap: 'break-word'
+                    }}>
+                      {selectedResearch.answer_text || ''}
+                      <span className="streaming-cursor">?</span>
+                    </p>
+                  </div>
+                ) : selectedResearch.answer_text ? (
+                  <p style={{ 
+                    margin: 0, 
+                    lineHeight: 1.8,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    overflowWrap: 'break-word'
+                  }}>
+                    {selectedResearch.answer_text}
+                  </p>
+                ) : (
+                  <div style={{ textAlign: 'center', padding: '3rem', color: 'hsl(var(--muted-foreground))' }}>
+                    <Loader size={24} className="spinner" style={{ display: 'inline-block', marginBottom: '1rem' }} />
+                    <p>No answer available yet. Click "Regenerate" to generate an answer.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
+
           {/* Empty State */}
-          {messages.length === 0 && !isStreaming && !modelsLoading && (
+          {messages.length === 0 && !isStreaming && !modelsLoading && !isViewingResearch && (
             <div className="empty-state">
               {appMode === 'research' ? (
                 <>
-                  <h1>?? Deep Research</h1>
+                  <h1>🔍 Deep Research</h1>
                   <p className="text-muted">
                     Ask complex questions and get comprehensive, AI-powered research answers.
                     <br />
@@ -1136,7 +1406,7 @@ function ChatPage() {
                 <>
                   <h1>What can I help with?</h1>
                   <p className="text-muted">
-                    Powered by decentralized GPU network ? 
+                    Powered by decentralized GPU network 🌐
                     {selectedModel ? ` Using ${selectedModel.name}` : ' Select a model to begin'}
                   </p>
                 </>
@@ -1144,7 +1414,7 @@ function ChatPage() {
               {isLocalMode && appMode === 'chat' && (
                 <div className="alert-box info" style={{ maxWidth: '600px', marginTop: '1rem', backgroundColor: '#d1fae5', border: '2px solid #10b981' }}>
                   <p style={{ margin: 0, fontSize: '0.9em', marginBottom: '0.5rem' }}>
-                    ?? <strong>Local Mode Active (TEST)</strong> - Using TinyLlama directly via HuggingFace transformers. 
+                    💻 <strong>Local Mode Active (TEST)</strong> - Using TinyLlama directly via HuggingFace transformers.
                     Bypasses Petals DHT entirely. First inference may take time as model downloads.
                   </p>
                   <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9 }}>
@@ -1162,13 +1432,13 @@ function ChatPage() {
                     ?? <strong>Context Support:</strong> Conversation history is included for coherent multi-turn conversations.
                   </p>
                   <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9 }}>
-                    ?? <strong>Note:</strong> GGUF models are not compatible. Use models like TinyLlama, Llama-2, or other standard HuggingFace models.
+                    ℹ️ <strong>Note:</strong> GGUF models are not compatible. Use models like TinyLlama, Llama-2, or other standard HuggingFace models.
                   </p>
                 </div>
               )}
               {isSettingUpPetals && (
                 <div className="alert-box info" style={{ maxWidth: '600px', marginTop: '1rem' }}>
-                  <h4>?? Setting Up Direct Mode...</h4>
+                  <h4>⚙️ Setting Up Direct Mode...</h4>
                   <p style={{ margin: 0, fontSize: '0.9em' }}>
                     Installing WSL and Petals. This may take a few minutes. 
                     Check the Setup Logs at the bottom for progress.
@@ -1179,7 +1449,7 @@ function ChatPage() {
           )}
 
           {/* Messages */}
-          {messages.map((msg) => (
+          {!isViewingResearch && messages.map((msg) => (
             <div key={msg.id} className={`message-wrapper ${msg.role === 'user' ? 'user' : msg.role === 'error' ? 'bot' : 'bot'}`}>
               <div className="message-avatar">
                 {msg.role === 'user' ? (
@@ -1221,7 +1491,7 @@ function ChatPage() {
           ))}
 
           {/* Streaming Message */}
-          {isStreaming && currentStreamingMessage && (
+          {!isViewingResearch && isStreaming && currentStreamingMessage && (
             <div className="message-wrapper bot">
               <div className="message-avatar">
                 <img src="/tauri.svg" alt="AI Assistant" />
@@ -1236,7 +1506,7 @@ function ChatPage() {
           )}
 
           {/* Waiting for first token */}
-          {isStreaming && !currentStreamingMessage && (
+          {!isViewingResearch && isStreaming && !currentStreamingMessage && (
             <div className="message-wrapper bot">
               <div className="message-avatar">
                 <img src="/tauri.svg" alt="AI Assistant" />
@@ -1254,7 +1524,7 @@ function ChatPage() {
           <div ref={conversationEndRef} />
 
           {/* Loading State */}
-          {modelsLoading && (
+          {!isViewingResearch && modelsLoading && (
             <div className="empty-state">
               <Loader size={32} className="spinner text-primary" />
               <p className="text-muted" style={{ marginTop: '1rem' }}>Loading available models...</p>
@@ -1262,7 +1532,7 @@ function ChatPage() {
           )}
 
           {/* Error State */}
-          {!selectedModel && !modelsLoading && modelsError && (
+          {!isViewingResearch && !selectedModel && !modelsLoading && modelsError && (
             <div className="empty-state">
               <AlertTriangle size={40} className="text-error" style={{ marginBottom: '1rem' }} />
               <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>Failed to Load Models</h2>
@@ -1271,14 +1541,14 @@ function ChatPage() {
           )}
 
           {/* No Selection State */}
-          {!selectedModel && !modelsLoading && !modelsError && models.length > 0 && conversation.length > 0 && (
+          {!isViewingResearch && !selectedModel && !modelsLoading && !modelsError && models.length > 0 && messages.length > 0 && (
             <div className="alert-box info" style={{ margin: '1rem auto', maxWidth: '600px' }}>
               <p>Please select an available model from the dropdown above to start chatting.</p>
             </div>
           )}
 
           {/* No Models Available State */}
-          {!selectedModel && !modelsLoading && !modelsError && models.length === 0 && (
+          {!isViewingResearch && !selectedModel && !modelsLoading && !modelsError && models.length === 0 && (
             <div className="empty-state">
               <h2 style={{ fontSize: '1.5rem', marginBottom: '0.5rem' }}>No Models Available</h2>
               <p className="text-muted">
@@ -1375,7 +1645,8 @@ function ChatPage() {
               onKeyDown={handleKeyDown}
               placeholder={
                 appMode === 'research' 
-                  ? (isStreaming ? 'Researching...' : 'Ask a research question...')
+                  ? (isViewingResearch ? 'Click "New Research" to ask a new question' :
+                     isStreaming ? 'Researching...' : 'Ask a research question...')
                   : (modelsLoading ? 'Loading models...' :
                      modelsError ? 'Cannot chat - model loading failed' :
                      !selectedModel ? 'Select a model to begin' :
@@ -1384,7 +1655,7 @@ function ChatPage() {
               }
               disabled={
                 appMode === 'research' 
-                  ? isStreaming 
+                  ? (isStreaming || isViewingResearch)
                   : (!selectedModel || modelsLoading || !!modelsError || isStreaming)
               }
               aria-label={appMode === 'research' ? 'Research question input' : 'Chat message input'}
@@ -1414,7 +1685,7 @@ function ChatPage() {
                 title={appMode === 'research' ? 'Start research' : 'Send message'}
                 disabled={
                   appMode === 'research'
-                    ? !inputValue.trim()
+                    ? (!inputValue.trim() || isViewingResearch)
                     : (!selectedModel || modelsLoading || !!modelsError || !inputValue.trim())
                 }
                 aria-label={appMode === 'research' ? 'Start research' : 'Send message'}
@@ -1427,12 +1698,12 @@ function ChatPage() {
           <div className="chat-input-footer">
             {appMode === 'research' ? (
               <span>
-                ?? Deep Research Mode - AI-powered comprehensive answers
-                {imagePreview && ' ? Image attached'}
+                🔍 Deep Research Mode - AI-powered comprehensive answers
+                {imagePreview && ' 🖼️ Image attached'}
               </span>
             ) : isLocalMode ? (
               <span style={{ color: '#10b981' }}>
-                ?? Local Mode (TEST) - Using HuggingFace transformers directly
+                💻 Local Mode (TEST) - Using HuggingFace transformers directly
               </span>
             ) : isTestingMode ? (
               <span style={{ color: 'hsl(var(--primary))' }}>
@@ -1440,13 +1711,13 @@ function ChatPage() {
               </span>
             ) : (
               <>
-                Powered by Torbiz distributed network ? 
+                Powered by Torbiz distributed network 🌐
                 {models.length > 0 && ` ${models.filter(m => m.available).length} models available`}
               </>
             )}
             {streamError && (
               <span style={{ color: 'hsl(var(--destructive-foreground))', marginLeft: '1rem' }}>
-                ? {streamError}
+                ⚠️ {streamError}
               </span>
             )}
             {(isLocalMode || isTestingMode || petalsLogs.length > 0) && (
@@ -1463,7 +1734,7 @@ function ChatPage() {
                   color: 'hsl(var(--foreground))',
                 }}
               >
-                {showPetalsLogs ? '?' : '?'} {isLocalMode ? 'Local Logs' : 'Petals Logs'} {petalsLogs.length > 0 && `(${petalsLogs.length})`}
+                {showPetalsLogs ? '👁️' : '📋'} {isLocalMode ? 'Local Logs' : 'Petals Logs'} {petalsLogs.length > 0 && `(${petalsLogs.length})`}
               </button>
             )}
           </div>
@@ -1487,7 +1758,7 @@ function ChatPage() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', position: 'sticky', top: 0, backgroundColor: 'hsl(var(--card))', paddingBottom: '0.5rem', borderBottom: '1px solid hsl(var(--border))' }}>
               <h4 style={{ margin: 0, fontSize: '0.85rem', color: 'hsl(var(--foreground))' }}>
-                {isLocalMode ? '?? Local Inference Logs' : '?? Petals Logs'}
+                {isLocalMode ? '💻 Local Inference Logs' : '⚡ Petals Logs'}
               </h4>
               <button
                 onClick={() => setShowPetalsLogs(false)}
@@ -1557,7 +1828,7 @@ function ChatPage() {
                 </div>
                 
                 <div className="alert-box warning" style={{ marginBottom: '1.5rem' }}>
-                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>?? Requirements</h4>
+                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>⚙️ Requirements</h4>
                   <p style={{ margin: '0.5rem 0' }}>
                     Automatic installation of:
                   </p>
@@ -1570,7 +1841,7 @@ function ChatPage() {
                     ?? First-time setup: 5-10 minutes
                   </p>
                   <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em', fontStyle: 'italic' }}>
-                    ?? macOS users: Homebrew must be installed first
+                    🍎 macOS users: Homebrew must be installed first
                   </p>
                 </div>
                 
@@ -1596,7 +1867,7 @@ function ChatPage() {
             ) : (
               <>
                 <div className="alert-box info" style={{ marginBottom: '1rem' }}>
-                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>?? Setting Up...</h4>
+                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>⚙️ Setting Up...</h4>
                   <p style={{ margin: 0, fontSize: '0.9em' }}>
                     Installing environment and Petals. This may take several minutes.
                     Please don't close this window.

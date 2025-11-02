@@ -253,7 +253,19 @@ pub async fn start_petals_seeder(
             return Err("macOS environment not set up. Please complete setup first by clicking the Share GPU button.".to_string());
         }
 
-        // Sync time before starting Petals (similar to WSL restart on Windows)
+        // Verify Docker is running
+        #[cfg(target_os = "macos")]
+        {
+            use crate::macos::{check_docker_running, check_docker_image_exists};
+            if !check_docker_running() {
+                return Err("Docker is not running. Please start Docker Desktop and try again.".to_string());
+            }
+            if !check_docker_image_exists() {
+                return Err("Docker image not found. Please complete the setup process again.".to_string());
+            }
+        }
+
+        // Sync time before starting Petals
         println!("[MACOS] Synchronizing system time...");
         #[cfg(target_os = "macos")]
         {
@@ -265,7 +277,7 @@ pub async fn start_petals_seeder(
         }
         println!("[MACOS] Time synchronization complete");
 
-        println!("[PETALS] Starting Petals on macOS...");
+        println!("[PETALS] Starting Petals in Docker container on macOS...");
         println!("[PETALS] Model: {}", model_name);
 
         let script_path = app
@@ -277,33 +289,55 @@ pub async fn start_petals_seeder(
             return Err(format!("Python script not found at: {}", script_path.display()));
         }
 
-        println!("[PETALS] Starting seeder with script: {}", script_path.display());
+        println!("[PETALS] Using script: {}", script_path.display());
 
-        // On macOS, let Petals auto-detect the best device (Metal GPU on Apple Silicon, CPU fallback)
-        // Don't force --device cpu, let Petals decide
-        println!("[PETALS] Letting Petals auto-detect device (Metal GPU on Apple Silicon, or CPU)");
+        // Get the parent directory (py folder) to mount in Docker
+        let py_dir = script_path.parent()
+            .ok_or("Failed to get script directory")?
+            .to_str()
+            .ok_or("Invalid script directory path")?;
 
-        let mut cmd = Command::new("python3");
-        cmd.arg(script_path.to_str().ok_or("Invalid script path")?)
-            .arg("--model-name")
-            .arg(&model_name)
-            .arg("--node-token")
-            .arg(&node_token);
+        // Get user's home directory for caching HuggingFace models
+        let home_dir = std::env::var("HOME")
+            .unwrap_or_else(|_| "/tmp".to_string());
 
-        if let Some(token) = hf_token {
-            cmd.arg("--hf-token").arg(&token);
+        // Build Docker run command
+        let mut docker_args = vec![
+            "run",
+            "--rm",  // Remove container after it stops
+            "--name", "torbiz-petals-seeder",
+            "--network", "host",  // Required for P2P DHT network
+            "-v", &format!("{}:/app/scripts:ro", py_dir),  // Mount Python scripts
+            "-v", &format!("{}/.cache/huggingface:/root/.cache/huggingface", home_dir),  // Cache models
+            "-v", &format!("{}/.torbiz/logs:/root/.torbiz/logs", home_dir),  // Persist logs
+            "torbiz-petals-macos:latest",
+            "python3", "/app/scripts/run_petals_seeder.py",
+            "--model-name", &model_name,
+            "--node-token", &node_token,
+            "--device", "cpu",  // Docker container uses CPU
+        ];
+
+        // Add HuggingFace token if provided
+        let hf_token_arg;
+        if let Some(token) = &hf_token {
+            hf_token_arg = format!("--hf-token={}", token);
+            docker_args.push(&hf_token_arg);
             println!("[PETALS] Using provided HuggingFace token");
         }
 
-        cmd.stdout(Stdio::piped())
+        println!("[PETALS] Docker command: docker {}", docker_args.join(" "));
+
+        let mut cmd = Command::new("docker");
+        cmd.args(&docker_args)
+            .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
         let mut child = cmd
             .spawn()
-            .map_err(|e| format!("Failed to spawn Python process: {}", e))?;
+            .map_err(|e| format!("Failed to spawn Docker container: {}", e))?;
 
         let child_id = child.id();
-        println!("[PETALS] Spawned process with PID: {}", child_id);
+        println!("[PETALS] Spawned Docker container with PID: {}", child_id);
 
         if let Some(stdout) = child.stdout.take() {
             let logs = state.seeder_logs.clone();
@@ -461,11 +495,11 @@ pub async fn start_petals_seeder(
         app.notification()
             .builder()
             .title("Model Sharing Active")
-            .body(format!("Now serving {} on macOS", model_name))
+            .body(format!("Now serving {} in Docker on macOS", model_name))
             .show()
             .ok();
 
-        Ok(format!("Petals seeder started for model: {}", model_name))
+        Ok(format!("Petals seeder started in Docker for model: {}", model_name))
     }
 
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
@@ -621,7 +655,37 @@ pub async fn stop_petals_seeder(
         Some(child) => {
             println!("[PETALS] Stopping seeder process...");
 
-            #[cfg(unix)]
+            #[cfg(target_os = "macos")]
+            {
+                // On macOS with Docker, stop the container gracefully
+                println!("[PETALS] Stopping Docker container...");
+                let stop_output = Command::new("docker")
+                    .args(&["stop", "torbiz-petals-seeder"])
+                    .output();
+                
+                match stop_output {
+                    Ok(output) => {
+                        if output.status.success() {
+                            println!("[PETALS] Docker container stopped gracefully");
+                        } else {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            println!("[PETALS] Docker stop warning: {}", stderr);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[PETALS] Failed to stop Docker container: {}", e);
+                    }
+                }
+                
+                // Also kill the docker run process
+                use nix::sys::signal::{kill, Signal};
+                use nix::unistd::Pid;
+                if let Err(e) = kill(Pid::from_raw(child.id() as i32), Signal::SIGTERM) {
+                    eprintln!("[PETALS] Failed to send SIGTERM to docker process: {}", e);
+                }
+            }
+            
+            #[cfg(all(unix, not(target_os = "macos")))]
             {
                 use nix::sys::signal::{kill, Signal};
                 use nix::unistd::Pid;

@@ -1,0 +1,27 @@
+# Docker Compose configuration for Torbiz macOS GPU Sharing
+# This file simplifies Docker container management
+
+version: '3.8'
+
+services:
+  torbiz-petals:
+    build:
+      context: .
+      dockerfile: Dockerfile.macos
+    image: torbiz-petals-macos:latest
+    container_name: torbiz-petals-seeder
+    network_mode: "host"  # Required for P2P DHT network communication
+    volumes:
+      - ./src-tauri/py:/app/scripts:ro  # Mount Python scripts as read-only
+      - ~/.cache/huggingface:/root/.cache/huggingface  # Cache HuggingFace models
+      - ~/.torbiz/logs:/root/.torbiz/logs  # Persist logs
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HF_HUB_DISABLE_TELEMETRY=1
+      - DISABLE_BNB=1
+      - BNB_AVAILABLE=0
+      - PEFT_DISABLE_BNB=1
+      - TRANSFORMERS_DISABLE_BNB=1
+    restart: unless-stopped
+    command: python3 --version  # Default command, will be overridden
+

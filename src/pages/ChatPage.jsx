@@ -1010,7 +1010,7 @@ function ChatPage() {
                         <span className="model-name">
                           {model.name} 
                           {!model.available && ' (Unavailable)'}
-                          {incompatibleWithDirectMode && ' ?? Not compatible with Direct Mode'}
+                          {incompatibleWithDirectMode && ' ⚠️ Not compatible with Direct Mode'}
                         </span>
                         <span className="model-provider">{model.provider}</span>
                         {model.minGpuMemory && (
@@ -1052,7 +1052,7 @@ function ChatPage() {
                   : 'Enable Local Mode (TEST) - Uses TinyLlama directly, bypasses Petals DHT'
               }
             >
-              <span style={{ fontSize: '1.2em' }}>??</span>
+              <span style={{ fontSize: '1.2em' }}>💻</span>
               <span>
                 {isLocalMode ? 'Local Mode: ON' : 'Local Mode (TEST)'}
               </span>
@@ -1087,7 +1087,7 @@ function ChatPage() {
                 </>
               ) : (
                 <>
-                  <span style={{ fontSize: '1.2em' }}>?</span>
+                  <span style={{ fontSize: '1.2em' }}>⚡</span>
                   <span>
                     {isTestingMode ? 'Direct Mode: ON' : 'Direct Mode'}
                   </span>
@@ -1286,7 +1286,7 @@ function ChatPage() {
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
                   <h2 style={{ margin: 0, fontSize: '1.25rem', color: 'hsl(var(--primary))' }}>
-                    ?? Research Question
+                    🔍 Research Question
                   </h2>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button
@@ -1356,7 +1356,7 @@ function ChatPage() {
                 minHeight: '300px',
               }}>
                 <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', color: 'hsl(var(--foreground))' }}>
-                  ?? AI Research Answer
+                  🤖 AI Research Answer
                 </h3>
                 {isStreaming ? (
                   <div>
@@ -1396,7 +1396,7 @@ function ChatPage() {
             <div className="empty-state">
               {appMode === 'research' ? (
                 <>
-                  <h1>?? Deep Research</h1>
+                  <h1>🔍 Deep Research</h1>
                   <p className="text-muted">
                     Ask complex questions and get comprehensive, AI-powered research answers.
                     <br />
@@ -1407,7 +1407,7 @@ function ChatPage() {
                 <>
                   <h1>What can I help with?</h1>
                   <p className="text-muted">
-                    Powered by decentralized GPU network ? 
+                    Powered by decentralized GPU network 🌐 
                     {selectedModel ? ` Using ${selectedModel.name}` : ' Select a model to begin'}
                   </p>
                 </>
@@ -1415,31 +1415,31 @@ function ChatPage() {
               {isLocalMode && appMode === 'chat' && (
                 <div className="alert-box info" style={{ maxWidth: '600px', marginTop: '1rem', backgroundColor: '#d1fae5', border: '2px solid #10b981' }}>
                   <p style={{ margin: 0, fontSize: '0.9em', marginBottom: '0.5rem' }}>
-                    ?? <strong>Local Mode Active (TEST)</strong> - Using TinyLlama directly via HuggingFace transformers. 
+                    💻 <strong>Local Mode Active (TEST)</strong> - Using TinyLlama directly via HuggingFace transformers. 
                     Bypasses Petals DHT entirely. First inference may take time as model downloads.
                   </p>
                   <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9 }}>
-                    ?? <strong>Context Support:</strong> Conversation history is sent with each message for better coherence.
+                    💡 <strong>Context Support:</strong> Conversation history is sent with each message for better coherence.
                   </p>
                 </div>
               )}
               {isTestingMode && petalsEnvStatus.ready && (
                 <div className="alert-box info" style={{ maxWidth: '600px', marginTop: '1rem' }}>
                   <p style={{ margin: 0, fontSize: '0.9em', marginBottom: '0.5rem' }}>
-                    ? <strong>Direct Petals Mode Active</strong> - Your messages connect directly to the Petals network, 
+                    ⚡ <strong>Direct Petals Mode Active</strong> - Your messages connect directly to the Petals network, 
                     bypassing the backend server.
                   </p>
                   <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9, marginBottom: '0.5rem' }}>
-                    ?? <strong>Context Support:</strong> Conversation history is included for coherent multi-turn conversations.
+                    💡 <strong>Context Support:</strong> Conversation history is included for coherent multi-turn conversations.
                   </p>
                   <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9 }}>
-                    ?? <strong>Note:</strong> GGUF models are not compatible. Use models like TinyLlama, Llama-2, or other standard HuggingFace models.
+                    ℹ️ <strong>Note:</strong> GGUF models are not compatible. Use models like TinyLlama, Llama-2, or other standard HuggingFace models.
                   </p>
                 </div>
               )}
               {isSettingUpPetals && (
                 <div className="alert-box info" style={{ maxWidth: '600px', marginTop: '1rem' }}>
-                  <h4>?? Setting Up Direct Mode...</h4>
+                  <h4>⚙️ Setting Up Direct Mode...</h4>
                   <p style={{ margin: 0, fontSize: '0.9em' }}>
                     Installing WSL and Petals. This may take a few minutes. 
                     Check the Setup Logs at the bottom for progress.
@@ -1699,26 +1699,26 @@ function ChatPage() {
           <div className="chat-input-footer">
             {appMode === 'research' ? (
               <span>
-                ?? Deep Research Mode - AI-powered comprehensive answers
-                {imagePreview && ' ? Image attached'}
+                🔍 Deep Research Mode - AI-powered comprehensive answers
+                {imagePreview && ' 🖼️ Image attached'}
               </span>
             ) : isLocalMode ? (
               <span style={{ color: '#10b981' }}>
-                ?? Local Mode (TEST) - Using HuggingFace transformers directly
+                💻 Local Mode (TEST) - Using HuggingFace transformers directly
               </span>
             ) : isTestingMode ? (
               <span style={{ color: 'hsl(var(--primary))' }}>
-                ? Direct Petals Mode - Bypassing backend
+                ⚡ Direct Petals Mode - Bypassing backend
               </span>
             ) : (
               <>
-                Powered by Torbiz distributed network ? 
+                Powered by Torbiz distributed network 🌐 
                 {models.length > 0 && ` ${models.filter(m => m.available).length} models available`}
               </>
             )}
             {streamError && (
               <span style={{ color: 'hsl(var(--destructive-foreground))', marginLeft: '1rem' }}>
-                ? {streamError}
+                ⚠️ {streamError}
               </span>
             )}
             {(isLocalMode || isTestingMode || petalsLogs.length > 0) && (
@@ -1735,7 +1735,7 @@ function ChatPage() {
                   color: 'hsl(var(--foreground))',
                 }}
               >
-                {showPetalsLogs ? '?' : '?'} {isLocalMode ? 'Local Logs' : 'Petals Logs'} {petalsLogs.length > 0 && `(${petalsLogs.length})`}
+                {showPetalsLogs ? '👁️' : '📋'} {isLocalMode ? 'Local Logs' : 'Petals Logs'} {petalsLogs.length > 0 && `(${petalsLogs.length})`}
               </button>
             )}
           </div>
@@ -1759,7 +1759,7 @@ function ChatPage() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', position: 'sticky', top: 0, backgroundColor: 'hsl(var(--card))', paddingBottom: '0.5rem', borderBottom: '1px solid hsl(var(--border))' }}>
               <h4 style={{ margin: 0, fontSize: '0.85rem', color: 'hsl(var(--foreground))' }}>
-                {isLocalMode ? '?? Local Inference Logs' : '?? Petals Logs'}
+                {isLocalMode ? '💻 Local Inference Logs' : '⚡ Petals Logs'}
               </h4>
               <button
                 onClick={() => setShowPetalsLogs(false)}
@@ -1772,7 +1772,7 @@ function ChatPage() {
                   padding: '4px',
                 }}
               >
-                ?
+                ✕
               </button>
             </div>
             <div style={{ fontSize: '0.75rem', lineHeight: '1.4', fontFamily: 'monospace' }}>
@@ -1816,7 +1816,7 @@ function ChatPage() {
               </button>
             )}
             
-            <h2 style={{ marginBottom: '1rem' }}>? Direct Petals Mode</h2>
+            <h2 style={{ marginBottom: '1rem' }}>⚡ Direct Petals Mode</h2>
             
             {!isSettingUpPetals ? (
               <>
@@ -1829,7 +1829,7 @@ function ChatPage() {
                 </div>
                 
                 <div className="alert-box warning" style={{ marginBottom: '1.5rem' }}>
-                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>?? Requirements</h4>
+                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>⚙️ Requirements</h4>
                   <p style={{ margin: '0.5rem 0' }}>
                     Automatic installation of:
                   </p>
@@ -1839,10 +1839,10 @@ function ChatPage() {
                     <li><strong>Additional packages</strong> (dependencies)</li>
                   </ul>
                   <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em' }}>
-                    ?? First-time setup: 5-10 minutes
+                    ⏱️ First-time setup: 5-10 minutes
                   </p>
                   <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em', fontStyle: 'italic' }}>
-                    ?? macOS users: Homebrew must be installed first
+                    🍎 macOS users: Homebrew must be installed first
                   </p>
                 </div>
                 
@@ -1850,7 +1850,7 @@ function ChatPage() {
                   className="modal-action-btn primary"
                   onClick={startPetalsSetup}
                 >
-                  ?? Start Setup & Enable Direct Mode
+                  🚀 Start Setup & Enable Direct Mode
                 </button>
                 
                 <button 
@@ -1868,7 +1868,7 @@ function ChatPage() {
             ) : (
               <>
                 <div className="alert-box info" style={{ marginBottom: '1rem' }}>
-                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>?? Setting Up...</h4>
+                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>⚙️ Setting Up...</h4>
                   <p style={{ margin: 0, fontSize: '0.9em' }}>
                     Installing environment and Petals. This may take several minutes.
                     Please don't close this window.

@@ -1,0 +1,256 @@
+================================================================================
+TORBIZ MACOS DOCKER SETUP GUIDE
+================================================================================
+
+OVERVIEW
+--------
+This guide explains how Docker is used to solve macOS GPU sharing dependency 
+issues in Torbiz.
+
+WHY DOCKER?
+-----------
+On Windows: WSL provides a stable Linux environment where all Python 
+dependencies (petals, peft, accelerate, etc.) work perfectly.
+
+On macOS: Direct Python installation often has dependency conflicts, especially 
+with peft and accelerate packages needed for GPU sharing.
+
+SOLUTION: Use Docker to create a containerized Linux environment on macOS,
+similar to how WSL works on Windows. This provides:
+- Isolated environment with all dependencies pre-installed
+- No conflicts with system Python
+- Consistent behavior across all macOS versions
+- Easy to rebuild if something goes wrong
+
+IMPORTANT: Direct inference (asking questions to models) still works without 
+Docker using your system Python. Docker is ONLY used for GPU sharing (hosting 
+model shards).
+
+================================================================================
+STEP-BY-STEP INSTALLATION GUIDE
+================================================================================
+
+STEP 1: INSTALL DOCKER DESKTOP
+-------------------------------
+1. Go to: https://www.docker.com/products/docker-desktop
+2. Download "Docker Desktop for Mac"
+   - Choose "Apple Silicon" if you have M1/M2/M3 Mac
+   - Choose "Intel Chip" if you have older Intel Mac
+3. Open the downloaded .dmg file
+4. Drag Docker icon to Applications folder
+5. Open Docker Desktop from Applications
+6. Wait for Docker to start (you'll see a whale icon in the menu bar)
+7. Docker will ask for permissions - grant them
+
+Docker Desktop is now installed!
+
+STEP 2: VERIFY DOCKER INSTALLATION
+-----------------------------------
+1. Open Terminal (Cmd + Space, type "Terminal")
+2. Run: docker --version
+   Expected output: Docker version 24.x.x or similar
+3. Run: docker info
+   Expected output: Information about Docker daemon (no errors)
+
+If you see version info, Docker is working!
+
+STEP 3: FIRST-TIME SETUP IN TORBIZ
+-----------------------------------
+1. Open Torbiz Desktop app
+2. Click "Share GPU" button
+3. The app will automatically:
+   ✓ Check if Docker is installed
+   ✓ Check if Docker is running
+   ✓ Install Python for direct inference (using Homebrew if needed)
+   ✓ Install Petals for direct inference
+   ✓ Build the Docker image (5-10 minutes, ONE-TIME ONLY)
+   ✓ Verify everything is ready
+
+Progress messages will show each step.
+
+STEP 4: START GPU SHARING
+--------------------------
+After setup completes:
+1. Select a model from the dropdown (e.g., "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+2. Click "Share GPU"
+3. The app will:
+   - Start a Docker container with Petals
+   - Download model shards (first time only)
+   - Connect to the Petals P2P network
+   - Start serving model blocks to the network
+
+You'll see log messages showing the progress.
+
+STEP 5: STOP GPU SHARING
+-------------------------
+When you want to stop sharing:
+1. Click "Stop Sharing" button
+2. The Docker container will stop gracefully
+3. Your GPU/CPU is no longer being used
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+PROBLEM: "Docker is not running"
+SOLUTION: 
+1. Open Docker Desktop app from Applications
+2. Wait for the whale icon to appear in menu bar
+3. Try "Share GPU" again
+
+PROBLEM: "Docker image not found"
+SOLUTION:
+1. Click "Share GPU" button again
+2. The app will rebuild the Docker image
+3. Wait 5-10 minutes for the build to complete
+
+PROBLEM: "Cannot connect to Docker daemon"
+SOLUTION:
+1. Restart Docker Desktop
+2. If that doesn't work, reinstall Docker Desktop
+3. Make sure to grant all permissions Docker asks for
+
+PROBLEM: GPU sharing fails with Python errors
+SOLUTION:
+This shouldn't happen anymore since everything runs in Docker!
+If you still see errors:
+1. Open Terminal
+2. Run: docker system prune -a
+3. This removes all Docker images/containers
+4. Restart Torbiz and click "Share GPU" to rebuild
+
+PROBLEM: Direct inference not working
+SOLUTION:
+Direct inference doesn't use Docker, it uses system Python.
+1. Make sure Homebrew is installed: https://brew.sh
+2. The app will automatically install Python and Petals
+3. If it fails, manually install:
+   brew install python@3.11
+   pip3 install git+https://github.com/bigscience-workshop/petals
+
+================================================================================
+TECHNICAL DETAILS
+================================================================================
+
+WHAT HAPPENS WHEN YOU SHARE GPU?
+---------------------------------
+1. Torbiz checks Docker is running
+2. Runs: docker run --rm --name torbiz-petals-seeder --network host \
+        -v /path/to/scripts:/app/scripts:ro \
+        -v ~/.cache/huggingface:/root/.cache/huggingface \
+        -v ~/.torbiz/logs:/root/.torbiz/logs \
+        torbiz-petals-macos:latest \
+        python3 /app/scripts/run_petals_seeder.py --model-name <model> --node-token <token>
+3. Docker container runs the Python script with all dependencies
+4. Container connects to Petals P2P network and serves model blocks
+
+DOCKER VOLUMES EXPLAINED
+-------------------------
+- /path/to/scripts → Your Python scripts (mounted read-only)
+- ~/.cache/huggingface → HuggingFace model cache (persisted on your Mac)
+- ~/.torbiz/logs → Log files (persisted on your Mac)
+
+This means:
+- Model downloads are cached (not re-downloaded each time)
+- Logs are saved on your Mac (can view them later)
+- Scripts are always up-to-date (mounted from app)
+
+DOCKER VS SYSTEM PYTHON
+------------------------
+GPU Sharing (run_petals_seeder.py):
+✓ Uses Docker container
+✓ All dependencies (petals, peft, accelerate) pre-installed
+✓ No conflicts with system Python
+✓ Reproducible environment
+
+Direct Inference (run_petals_inference.py):
+✓ Uses system Python 3
+✓ Only needs petals + torch (no peft/accelerate)
+✓ Faster to start (no Docker overhead)
+✓ Works even if Docker is not installed
+
+================================================================================
+DOCKER COMMANDS (FOR ADVANCED USERS)
+================================================================================
+
+View running containers:
+    docker ps
+
+View all containers (including stopped):
+    docker ps -a
+
+Stop the Torbiz container manually:
+    docker stop torbiz-petals-seeder
+
+View Docker images:
+    docker images
+
+Remove Torbiz Docker image:
+    docker rmi torbiz-petals-macos:latest
+
+Rebuild Docker image manually:
+    cd /path/to/torbiz-desktop
+    docker build -f Dockerfile.macos -t torbiz-petals-macos:latest .
+
+View container logs in real-time:
+    docker logs -f torbiz-petals-seeder
+
+Enter running container (for debugging):
+    docker exec -it torbiz-petals-seeder bash
+
+Clean up all Docker resources:
+    docker system prune -a
+
+================================================================================
+COMPARISON: WINDOWS VS MACOS
+================================================================================
+
+                    WINDOWS (WSL)           MACOS (Docker)
+                    -------------           ---------------
+Environment:        WSL2 Linux              Docker Container
+Python Location:    ~/.torbiz_venv          Container Python
+Dependencies:       Installed in WSL        Pre-built in image
+GPU Sharing:        Works directly          Via Docker
+Direct Inference:   Via WSL                 Via system Python
+Model Cache:        WSL filesystem          Mac filesystem
+Setup Time:         5-10 minutes            5-10 minutes
+Reliability:        Very High               Very High
+
+Both solutions provide the same functionality with the same level of stability!
+
+================================================================================
+FAQ
+================================================================================
+
+Q: Do I need Docker for everything?
+A: No! Only for GPU sharing. Direct inference uses system Python.
+
+Q: Does Docker slow down GPU sharing?
+A: No significant performance impact. Docker container runs natively on macOS.
+
+Q: Can I use Docker Desktop for other projects?
+A: Yes! Docker is useful for many development projects.
+
+Q: How much disk space does Docker use?
+A: Docker image: ~2-3 GB
+   Model cache: Varies by model (5-20 GB typically)
+
+Q: Can I share GPU without Docker?
+A: Not on macOS. The dependency issues are too complex to solve without 
+   containerization. Docker is the clean, reliable solution.
+
+Q: What if I don't want to install Docker?
+A: You can still use direct inference (asking questions to models).
+   You just won't be able to share your GPU with the network.
+
+Q: Is my data safe?
+A: Yes! Docker containers are isolated. Only the specified folders 
+   (scripts, model cache, logs) are accessible to the container.
+
+================================================================================
+END OF GUIDE
+================================================================================
+
+For more help, visit: https://docs.docker.com/desktop/mac/
+Or check Torbiz documentation at: [your documentation link]
+

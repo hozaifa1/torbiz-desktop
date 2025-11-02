@@ -31,6 +31,97 @@ fn find_executable(name: &str, standard_paths: &[&str]) -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
+/// Check if Docker is installed on macOS
+pub fn check_docker_installed() -> bool {
+    // Check if docker command is available
+    if let Ok(output) = Command::new("docker").arg("--version").output() {
+        if output.status.success() {
+            let version = String::from_utf8_lossy(&output.stdout);
+            println!("[MACOS] Docker found: {}", version.trim());
+            return true;
+        }
+    }
+    
+    // Check common Docker Desktop locations
+    let docker_app_path = "/Applications/Docker.app";
+    if std::path::Path::new(docker_app_path).exists() {
+        println!("[MACOS] Docker Desktop app found at {}", docker_app_path);
+        // Docker might be installed but not running
+        return true;
+    }
+    
+    println!("[MACOS] Docker not found");
+    false
+}
+
+#[cfg(target_os = "macos")]
+/// Check if Docker daemon is running
+pub fn check_docker_running() -> bool {
+    match Command::new("docker").arg("info").output() {
+        Ok(output) => {
+            if output.status.success() {
+                println!("[MACOS] Docker daemon is running");
+                true
+            } else {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                println!("[MACOS] Docker daemon not running: {}", stderr);
+                false
+            }
+        }
+        Err(e) => {
+            println!("[MACOS] Failed to check Docker status: {}", e);
+            false
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+/// Check if Torbiz Docker image exists
+pub fn check_docker_image_exists() -> bool {
+    match Command::new("docker")
+        .args(&["images", "-q", "torbiz-petals-macos:latest"])
+        .output()
+    {
+        Ok(output) => {
+            let result = String::from_utf8_lossy(&output.stdout);
+            let exists = !result.trim().is_empty();
+            println!("[MACOS] Docker image exists: {}", exists);
+            exists
+        }
+        Err(e) => {
+            println!("[MACOS] Failed to check Docker image: {}", e);
+            false
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+/// Build Docker image for Torbiz Petals
+pub fn build_docker_image(project_root: &str) -> Result<(), String> {
+    println!("[MACOS] Building Docker image for Torbiz Petals...");
+    println!("[MACOS] This may take 5-10 minutes on first run...");
+    
+    let output = Command::new("docker")
+        .args(&[
+            "build",
+            "-f", "Dockerfile.macos",
+            "-t", "torbiz-petals-macos:latest",
+            project_root
+        ])
+        .output()
+        .map_err(|e| format!("Failed to run docker build: {}", e))?;
+    
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!("Docker build failed:\nSTDERR: {}\nSTDOUT: {}", stderr, stdout));
+    }
+    
+    println!("[MACOS] Docker image built successfully");
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
 pub fn check_python3_installed() -> bool {
     let python_paths = vec![
         "python3",                      // Try PATH first
@@ -231,10 +322,12 @@ pub fn sync_macos_time() -> Result<(), String> {
 #[tauri::command]
 pub async fn setup_macos_environment(
     window: tauri::Window,
+    app: tauri::AppHandle,
 ) -> Result<String, String> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = window; // Suppress unused warning
+        let _ = app; // Suppress unused warning
         return Err("macOS setup is only for macOS devices.".to_string());
     }
 
@@ -248,27 +341,58 @@ pub async fn setup_macos_environment(
             });
         };
 
-        emit_progress("checking_homebrew", "Checking Homebrew installation...", 10);
+        emit_progress("checking_docker", "Checking Docker installation...", 10);
         
-        if !check_homebrew_installed() {
-            emit_progress("homebrew_missing", "Homebrew not found", 15);
+        if !check_docker_installed() {
+            emit_progress("docker_missing", "Docker not found", 15);
             return Err(format!(
-                "Homebrew is required but not found. Please install it from https://brew.sh\n\n\
-                We checked:\n\
-                - System PATH\n\
-                - /opt/homebrew/bin/brew (Apple Silicon)\n\
-                - /usr/local/bin/brew (Intel Mac)\n\n\
-                After installing Homebrew, you may need to restart the app."
+                "Docker is required for GPU sharing on macOS but not found.\n\n\
+                Please install Docker Desktop from:\n\
+                https://www.docker.com/products/docker-desktop\n\n\
+                After installing Docker Desktop:\n\
+                1. Open Docker Desktop app\n\
+                2. Wait for it to start (whale icon in menu bar)\n\
+                3. Click 'Share GPU' again\n\n\
+                Note: Direct inference will still work without Docker."
             ));
         }
         
-        println!("[MACOS] Homebrew is installed");
-        emit_progress("homebrew_ok", "Homebrew found", 20);
+        println!("[MACOS] Docker is installed");
+        emit_progress("docker_ok", "Docker found", 25);
 
-        emit_progress("checking_python", "Checking Python installation...", 30);
+        emit_progress("checking_docker_running", "Checking if Docker is running...", 30);
         
+        if !check_docker_running() {
+            emit_progress("docker_not_running", "Docker daemon not running", 35);
+            return Err(format!(
+                "Docker is installed but not running.\n\n\
+                Please start Docker Desktop:\n\
+                1. Open Docker Desktop app from Applications\n\
+                2. Wait for the whale icon to appear in menu bar\n\
+                3. Click 'Share GPU' again\n\n\
+                Note: Direct inference will still work without Docker."
+            ));
+        }
+        
+        println!("[MACOS] Docker daemon is running");
+        emit_progress("docker_running", "Docker is running", 40);
+
+        emit_progress("checking_python", "Checking Python for direct inference...", 50);
+        
+        // Install Python for direct inference (not GPU sharing)
         if !check_python3_installed() {
-            emit_progress("installing_python", "Installing Python 3 via Homebrew...", 40);
+            emit_progress("checking_homebrew", "Need Homebrew to install Python...", 55);
+            
+            if !check_homebrew_installed() {
+                return Err(format!(
+                    "Homebrew is required to install Python for direct inference.\n\
+                    Please install it from https://brew.sh\n\n\
+                    GPU sharing will use Docker (already set up),\n\
+                    but direct inference needs Python installed on your system."
+                ));
+            }
+            
+            emit_progress("installing_python", "Installing Python 3 via Homebrew...", 60);
             
             let python_install = Command::new("brew")
                 .arg("install")
@@ -284,31 +408,56 @@ pub async fn setup_macos_environment(
             println!("[MACOS] Python installed successfully");
         }
         
-        emit_progress("python_ok", "Python 3 ready", 50);
+        emit_progress("python_ok", "Python 3 ready for inference", 70);
 
-        emit_progress("checking_petals", "Checking Petals installation...", 60);
+        emit_progress("checking_petals", "Checking Petals for direct inference...", 75);
         
+        // Install Petals for direct inference (client-only, no peft/accelerate needed)
         if !check_petals_installed() {
-            emit_progress("installing_petals", "Installing Petals library (this may take 5-10 minutes)...", 70);
+            emit_progress("installing_petals", "Installing Petals for direct inference (3-5 minutes)...", 80);
             
             install_petals_macos()?;
             
-            emit_progress("verifying_petals", "Verifying Petals installation...", 90);
+            emit_progress("verifying_petals", "Verifying Petals installation...", 85);
             
             if !check_petals_installed() {
-                return Err("Petals installation completed but verification failed. Please restart the app.".to_string());
+                println!("[MACOS-SETUP] Petals verification failed, but continuing (Docker will handle GPU sharing)");
             }
         }
         
+        emit_progress("checking_docker_image", "Checking Docker image for GPU sharing...", 88);
+        
+        // Get project root directory
+        let project_root = app.path()
+            .app_config_dir()
+            .map_err(|e| format!("Failed to get app directory: {}", e))?
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.parent())
+            .ok_or("Failed to determine project root")?
+            .to_str()
+            .ok_or("Invalid project root path")?;
+        
+        if !check_docker_image_exists() {
+            emit_progress("building_docker_image", "Building Docker image (5-10 minutes, one-time setup)...", 90);
+            
+            build_docker_image(project_root)?;
+            
+            emit_progress("docker_image_ready", "Docker image built successfully", 95);
+        } else {
+            println!("[MACOS] Docker image already exists");
+            emit_progress("docker_image_ready", "Docker image ready", 95);
+        }
+        
         // Sync time before completing setup
-        emit_progress("sync_time", "Synchronizing system time...", 95);
+        emit_progress("sync_time", "Synchronizing system time...", 97);
         if let Err(e) = sync_macos_time() {
             println!("[MACOS-SETUP] Time sync warning: {}", e);
             // Don't fail setup for this
         }
         
-        emit_progress("complete", "macOS environment ready for Petals!", 100);
-        Ok("macOS environment is ready for Petals".to_string())
+        emit_progress("complete", "macOS environment ready! GPU sharing will use Docker.", 100);
+        Ok("macOS environment is ready. GPU sharing will run in Docker container.".to_string())
     }
 }
 

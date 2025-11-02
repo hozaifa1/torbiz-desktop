@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import {
     ChevronLeft, ChevronRight, Share2, ChevronDown,
     MessageSquarePlus, Paperclip, SendHorizontal, Loader, AlertTriangle, StopCircle,
-    User, Settings, Network
+    User, Settings, Network, Search, MessageCircle, X, Image as ImageIcon
 } from 'lucide-react';
 
 import HardwareInfoDisplay from '../components/HardwareInfoDisplay';
@@ -13,6 +13,7 @@ import api from '../services/api';
 import { streamInference, createInference } from '../services/inferenceService';
 import { runDirectInference } from '../services/directInferenceService';
 import { runLocalInference } from '../services/localInferenceService';
+import { streamDeepResearch, getDeepResearchByClient } from '../services/deepResearchService';
 
 // --- Placeholder Data ---
 const chatHistory = [
@@ -32,6 +33,16 @@ function ChatPage() {
   const [modelsLoading, setModelsLoading] = useState(true);
   const [modelsError, setModelsError] = useState(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  
+  // Mode toggle - Chat vs Deep Research
+  const [appMode, setAppMode] = useState('chat'); // 'chat' or 'research'
+  
+  // Deep Research state
+  const [researchHistory, setResearchHistory] = useState([]);
+  const [researchLoading, setResearchLoading] = useState(false);
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
+  const imageInputRef = useRef(null);
   
   // Testing mode - direct Petals inference
   const [isTestingMode, setIsTestingMode] = useState(false);
@@ -106,6 +117,25 @@ function ChatPage() {
     fetchModels();
   }, []); // Empty dependency array means this runs once on mount
 
+  // Fetch research history when in research mode
+  useEffect(() => {
+    const fetchResearchHistory = async () => {
+      if (appMode === 'research' && user?.id) {
+        setResearchLoading(true);
+        try {
+          const history = await getDeepResearchByClient(user.id);
+          setResearchHistory(history);
+        } catch (error) {
+          console.error('[RESEARCH] Failed to fetch history:', error);
+        } finally {
+          setResearchLoading(false);
+        }
+      }
+    };
+
+    fetchResearchHistory();
+  }, [appMode, user?.id]);
+
   // Auto-scroll to bottom when new messages arrive or streaming updates
   useEffect(() => {
     if (conversationEndRef.current) {
@@ -142,7 +172,132 @@ function ChatPage() {
     };
   }, [isSettingUpPetals]);
 
-  // Handle send message
+  // Handle image file selection
+  const handleImageSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setSelectedImage(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Remove selected image
+  const handleRemoveImage = () => {
+    setSelectedImage(null);
+    setImagePreview(null);
+    if (imageInputRef.current) {
+      imageInputRef.current.value = '';
+    }
+  };
+
+  // Handle mode switch
+  const handleModeSwitch = (newMode) => {
+    if (isStreaming) {
+      handleStopStreaming();
+    }
+    setAppMode(newMode);
+    setMessages([]);
+    setCurrentStreamingMessage('');
+    setInputValue('');
+    setStreamError(null);
+    handleRemoveImage();
+    console.log(`[MODE] Switched to ${newMode} mode`);
+  };
+
+  // Handle deep research send
+  const handleDeepResearchSend = async () => {
+    const trimmedInput = inputValue.trim();
+    
+    if (!trimmedInput) {
+      console.log('[RESEARCH] Empty input, ignoring send');
+      return;
+    }
+
+    if (isStreaming) {
+      console.log('[RESEARCH] Already streaming, ignoring send');
+      return;
+    }
+
+    if (!user?.id) {
+      setStreamError('User session error. Please log in again.');
+      return;
+    }
+
+    console.log('[RESEARCH] Starting deep research:', { 
+      question: trimmedInput.substring(0, 50) + '...', 
+      hasImage: !!selectedImage 
+    });
+
+    // Clear input immediately
+    setInputValue('');
+    setStreamError(null);
+
+    // Add user message with optional image
+    const userMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: trimmedInput,
+      timestamp: new Date(),
+      image: imagePreview || null,
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+
+    // Start streaming
+    setIsStreaming(true);
+    setCurrentStreamingMessage('');
+    streamingMessageRef.current = '';
+
+    try {
+      const abortFn = await streamDeepResearch(
+        user.id,
+        trimmedInput,
+        selectedImage,
+        // onToken callback
+        (token) => {
+          streamingMessageRef.current += token;
+          setCurrentStreamingMessage(prev => prev + token);
+        },
+        // onComplete callback
+        () => {
+          console.log('[RESEARCH] Stream completed');
+          handleStreamComplete();
+          // Refresh research history
+          getDeepResearchByClient(user.id).then(history => {
+            setResearchHistory(history);
+          }).catch(err => console.error('[RESEARCH] Failed to refresh history:', err));
+        },
+        // onError callback
+        (error) => {
+          console.error('[RESEARCH] Stream error:', error);
+          handleStreamError(error);
+        }
+      );
+
+      abortStreamRef.current = abortFn;
+    } catch (error) {
+      console.error('[RESEARCH] Failed to start stream:', error);
+      handleStreamError(error.message || 'Failed to start deep research');
+    } finally {
+      // Clear image after sending
+      handleRemoveImage();
+    }
+  };
+
+  // Main send handler - routes to appropriate function based on mode
+  const handleUnifiedSend = () => {
+    if (appMode === 'research') {
+      handleDeepResearchSend();
+    } else {
+      handleSendMessage();
+    }
+  };
+
+  // Handle send message (for regular chat)
   const handleSendMessage = async () => {
     const trimmedInput = inputValue.trim();
     
@@ -152,7 +307,7 @@ function ChatPage() {
       return;
     }
 
-    if (!selectedModel) {
+    if (!selectedModel && appMode === 'chat') {
       setStreamError('Please select a model first');
       return;
     }
@@ -400,13 +555,13 @@ function ChatPage() {
       console.log('[DIRECT-MODE-TOGGLE] Turning OFF');
       setIsTestingMode(false);
       setPetalsEnvStatus({ ready: false, needsSetup: false, platform: 'unknown', message: 'Direct Mode disabled' });
-      setPetalsLogs(prev => [...prev, '🔌 Direct Mode disabled']);
+      setPetalsLogs(prev => [...prev, '?? Direct Mode disabled']);
       return;
     }
     
     // IMMEDIATE FEEDBACK - Set loading state before async check
     setIsCheckingPetals(true);
-    setPetalsLogs(['🔍 Checking Petals environment...']);
+    setPetalsLogs(['?? Checking Petals environment...']);
     setShowPetalsLogs(true); // Show logs panel immediately
     
     console.log('[DIRECT-MODE-TOGGLE] Checking environment...');
@@ -420,16 +575,16 @@ function ChatPage() {
         console.log('[DIRECT-MODE-TOGGLE] Petals ready, enabling Direct Mode');
         setIsTestingMode(true);
         setPetalsEnvStatus({ ready: true, needsSetup: false, platform: 'detected', message: 'Petals ready for inference' });
-        setPetalsLogs(['✅ Environment verified', '⚡ Direct Mode enabled - ready for inference']);
+        setPetalsLogs(['? Environment verified', '? Direct Mode enabled - ready for inference']);
       } else {
         // Needs setup - open modal
         console.log('[DIRECT-MODE-TOGGLE] Petals not ready, showing setup modal');
-        setPetalsLogs(prev => [...prev, '⚠️ Petals not installed', '🔧 Setup required']);
+        setPetalsLogs(prev => [...prev, '?? Petals not installed', '?? Setup required']);
         setShowSetupConfirmation(true);
       }
     } catch (error) {
       console.error('[DIRECT-MODE-TOGGLE] Check failed:', error);
-      setPetalsLogs(prev => [...prev, `❌ Check failed: ${error.message}`, '🔧 Setup may be required']);
+      setPetalsLogs(prev => [...prev, `? Check failed: ${error.message}`, '?? Setup may be required']);
       setShowSetupConfirmation(true);
     } finally {
       // Clear loading state
@@ -440,7 +595,7 @@ function ChatPage() {
   // Actually start the setup after confirmation
   const startPetalsSetup = async () => {
     setIsSettingUpPetals(true);
-    setPetalsLogs(['🚀 Starting setup process...']);
+    setPetalsLogs(['?? Starting setup process...']);
     
     try {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -450,33 +605,33 @@ function ChatPage() {
       const isWin = navigator.userAgent.includes('Windows');
       
       if (isMac) {
-        setPetalsLogs(prev => [...prev, '🍎 Detected macOS - setting up native environment...']);
+        setPetalsLogs(prev => [...prev, '?? Detected macOS - setting up native environment...']);
         
         // Setup macOS environment
         await invoke('setup_macos_environment');
         await invoke('mark_macos_setup_complete');
       } else if (isWin) {
-        setPetalsLogs(prev => [...prev, '🔍 Checking WSL installation...']);
+        setPetalsLogs(prev => [...prev, '?? Checking WSL installation...']);
         
         // Setup WSL environment for client inference (minimal dependencies)
         await invoke('setup_wsl_environment_client');
         await invoke('mark_wsl_setup_complete');
       } else {
-        setPetalsLogs(prev => [...prev, '🐧 Detected Linux - setting up environment...']);
+        setPetalsLogs(prev => [...prev, '?? Detected Linux - setting up environment...']);
         // For Linux, we assume Python and pip are already available
-        setPetalsLogs(prev => [...prev, '⚠️ On Linux, please install Petals manually: pip install git+https://github.com/bigscience-workshop/petals']);
+        setPetalsLogs(prev => [...prev, '?? On Linux, please install Petals manually: pip install git+https://github.com/bigscience-workshop/petals']);
         throw new Error('Linux setup not yet automated. Please install Petals manually.');
       }
       
-      setPetalsLogs(prev => [...prev, '✅ Environment and Petals installed successfully!']);
-      setPetalsLogs(prev => [...prev, '🔍 Verifying installation...']);
+      setPetalsLogs(prev => [...prev, '? Environment and Petals installed successfully!']);
+      setPetalsLogs(prev => [...prev, '?? Verifying installation...']);
       
       // Verify it's ready
       const isPetalsReady = await invoke('check_petals_inference_ready');
       
       if (isPetalsReady) {
-        setPetalsLogs(prev => [...prev, '✅ Direct Mode is ready!']);
-        setPetalsLogs(prev => [...prev, '⚡ Enabling Direct Mode...']);
+        setPetalsLogs(prev => [...prev, '? Direct Mode is ready!']);
+        setPetalsLogs(prev => [...prev, '? Enabling Direct Mode...']);
         
         // Wait a moment for user to see success
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -486,15 +641,15 @@ function ChatPage() {
         setPetalsEnvStatus({ ready: true, needsSetup: false, platform: 'detected', message: 'Petals ready for inference' });
         setShowPetalsLogs(true);
         setShowSetupConfirmation(false);
-        setPetalsLogs(['⚡ Direct Mode enabled - ready for inference']);
+        setPetalsLogs(['? Direct Mode enabled - ready for inference']);
       } else {
-        setPetalsLogs(prev => [...prev, '⚠️ Setup completed but verification failed']);
-        setPetalsLogs(prev => [...prev, '💡 Try restarting the app or check the Share GPU button']);
+        setPetalsLogs(prev => [...prev, '?? Setup completed but verification failed']);
+        setPetalsLogs(prev => [...prev, '?? Try restarting the app or check the Share GPU button']);
       }
     } catch (error) {
       console.error('[DIRECT-MODE] Setup failed:', error);
-      setPetalsLogs(prev => [...prev, `❌ Setup failed: ${error}`]);
-      setPetalsLogs(prev => [...prev, '💡 You can also use the Share GPU button to set up the environment']);
+      setPetalsLogs(prev => [...prev, `? Setup failed: ${error}`]);
+      setPetalsLogs(prev => [...prev, '?? You can also use the Share GPU button to set up the environment']);
     } finally {
       setIsSettingUpPetals(false);
     }
@@ -505,7 +660,7 @@ function ChatPage() {
     // Send on Enter (without Shift)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      handleUnifiedSend();
     }
   };
 
@@ -518,7 +673,8 @@ function ChatPage() {
     setCurrentStreamingMessage('');
     setInputValue('');
     setStreamError(null);
-    console.log('[CHAT] Started new conversation');
+    handleRemoveImage();
+    console.log(`[${appMode.toUpperCase()}] Started new conversation`);
   };
 
   // --- Render Model Selector Content ---
@@ -574,23 +730,54 @@ function ChatPage() {
       {/* Chat History Sidebar */}
       <aside className={`chat-history-sidebar ${isHistoryVisible ? 'visible' : ''}`}>
         <div className="history-header">
-          <h3>Chat History</h3>
+          <h3>{appMode === 'research' ? 'Research History' : 'Chat History'}</h3>
           <button className="icon-btn" onClick={() => setIsHistoryVisible(false)} aria-label="Close sidebar">
             <ChevronLeft size={20} />
           </button>
         </div>
         <button className="new-chat-btn" onClick={handleNewChat}>
           <MessageSquarePlus size={16} />
-          New Chat
+          {appMode === 'research' ? 'New Research' : 'New Chat'}
         </button>
         <ul className="history-list">
-          {chatHistory.map(chat => (
-            <li key={chat.id}>{chat.title}</li>
-          ))}
-          {chatHistory.length === 0 && (
-            <li style={{ color: 'hsl(var(--muted-foreground))', fontStyle: 'italic', cursor: 'default', textAlign: 'center', padding: '2rem 1rem' }}>
-              No chats yet. Start a new conversation!
-            </li>
+          {appMode === 'research' ? (
+            <>
+              {researchLoading ? (
+                <li style={{ color: 'hsl(var(--muted-foreground))', textAlign: 'center', padding: '1rem' }}>
+                  <Loader size={20} className="spinner" style={{ display: 'inline-block' }} />
+                </li>
+              ) : researchHistory.length > 0 ? (
+                researchHistory.map(research => (
+                  <li 
+                    key={research.id} 
+                    style={{ cursor: 'pointer', fontSize: '0.9em' }}
+                    title={research.question_text}
+                  >
+                    {research.question_text.length > 50 
+                      ? research.question_text.substring(0, 50) + '...' 
+                      : research.question_text}
+                    <div style={{ fontSize: '0.75em', color: 'hsl(var(--muted-foreground))', marginTop: '0.25rem' }}>
+                      {new Date(research.created_at).toLocaleDateString()}
+                    </div>
+                  </li>
+                ))
+              ) : (
+                <li style={{ color: 'hsl(var(--muted-foreground))', fontStyle: 'italic', cursor: 'default', textAlign: 'center', padding: '2rem 1rem' }}>
+                  No research history yet. Ask your first question!
+                </li>
+              )}
+            </>
+          ) : (
+            <>
+              {chatHistory.map(chat => (
+                <li key={chat.id}>{chat.title}</li>
+              ))}
+              {chatHistory.length === 0 && (
+                <li style={{ color: 'hsl(var(--muted-foreground))', fontStyle: 'italic', cursor: 'default', textAlign: 'center', padding: '2rem 1rem' }}>
+                  No chats yet. Start a new conversation!
+                </li>
+              )}
+            </>
           )}
         </ul>
         {/* Hardware Info Display at the bottom */}
@@ -610,7 +797,50 @@ function ChatPage() {
               {isHistoryVisible ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
             </button>
 
-            {/* Model Selector */}
+            {/* Mode Toggle */}
+            <div style={{ display: 'flex', gap: '0.5rem', marginRight: '1rem', borderRight: '1px solid hsl(var(--border))', paddingRight: '1rem' }}>
+              <button
+                className={`mode-toggle-btn ${appMode === 'chat' ? 'active' : ''}`}
+                onClick={() => handleModeSwitch('chat')}
+                style={{
+                  padding: '0.5rem 1rem',
+                  borderRadius: 'var(--radius)',
+                  backgroundColor: appMode === 'chat' ? 'hsl(var(--primary))' : 'hsl(var(--secondary))',
+                  color: appMode === 'chat' ? 'hsl(var(--primary-foreground))' : 'hsl(var(--foreground))',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  fontSize: '0.9rem',
+                  fontWeight: appMode === 'chat' ? 600 : 400,
+                }}
+              >
+                <MessageCircle size={16} />
+                <span>Chat</span>
+              </button>
+              <button
+                className={`mode-toggle-btn ${appMode === 'research' ? 'active' : ''}`}
+                onClick={() => handleModeSwitch('research')}
+                style={{
+                  padding: '0.5rem 1rem',
+                  borderRadius: 'var(--radius)',
+                  backgroundColor: appMode === 'research' ? 'hsl(var(--primary))' : 'hsl(var(--secondary))',
+                  color: appMode === 'research' ? 'hsl(var(--primary-foreground))' : 'hsl(var(--foreground))',
+                  border: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  fontSize: '0.9rem',
+                  fontWeight: appMode === 'research' ? 600 : 400,
+                }}
+              >
+                <Search size={16} />
+                <span>Deep Research</span>
+              </button>
+            </div>
+
+            {/* Model Selector - Only show in chat mode */}
+            {appMode === 'chat' && (
             <div className="model-selector">
               <button
                 className="model-selector-btn"
@@ -650,7 +880,7 @@ function ChatPage() {
                         <span className="model-name">
                           {model.name} 
                           {!model.available && ' (Unavailable)'}
-                          {incompatibleWithDirectMode && ' ⚠️ Not compatible with Direct Mode'}
+                          {incompatibleWithDirectMode && ' ?? Not compatible with Direct Mode'}
                         </span>
                         <span className="model-provider">{model.provider}</span>
                         {model.minGpuMemory && (
@@ -664,6 +894,7 @@ function ChatPage() {
                 </ul>
               )}
             </div>
+            )}
           </div>
 
           {/* Header Actions */}
@@ -675,7 +906,7 @@ function ChatPage() {
                 // Turn off other modes
                 if (!isLocalMode) {
                   setIsTestingMode(false);
-                  setPetalsLogs(['🚀 Local Mode - Using HuggingFace transformers directly']);
+                  setPetalsLogs(['?? Local Mode - Using HuggingFace transformers directly']);
                   setShowPetalsLogs(true);
                 }
                 setIsLocalMode(!isLocalMode);
@@ -691,7 +922,7 @@ function ChatPage() {
                   : 'Enable Local Mode (TEST) - Uses TinyLlama directly, bypasses Petals DHT'
               }
             >
-              <span style={{ fontSize: '1.2em' }}>🧪</span>
+              <span style={{ fontSize: '1.2em' }}>??</span>
               <span>
                 {isLocalMode ? 'Local Mode: ON' : 'Local Mode (TEST)'}
               </span>
@@ -726,7 +957,7 @@ function ChatPage() {
                 </>
               ) : (
                 <>
-                  <span style={{ fontSize: '1.2em' }}>⚡</span>
+                  <span style={{ fontSize: '1.2em' }}>?</span>
                   <span>
                     {isTestingMode ? 'Direct Mode: ON' : 'Direct Mode'}
                   </span>
@@ -892,39 +1123,52 @@ function ChatPage() {
           {/* Empty State */}
           {messages.length === 0 && !isStreaming && !modelsLoading && (
             <div className="empty-state">
-              <h1>What can I help with?</h1>
-              <p className="text-muted">
-                Powered by decentralized GPU network · 
-                {selectedModel ? ` Using ${selectedModel.name}` : ' Select a model to begin'}
-              </p>
-              {isLocalMode && (
+              {appMode === 'research' ? (
+                <>
+                  <h1>?? Deep Research</h1>
+                  <p className="text-muted">
+                    Ask complex questions and get comprehensive, AI-powered research answers.
+                    <br />
+                    You can even upload images for visual context!
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h1>What can I help with?</h1>
+                  <p className="text-muted">
+                    Powered by decentralized GPU network ? 
+                    {selectedModel ? ` Using ${selectedModel.name}` : ' Select a model to begin'}
+                  </p>
+                </>
+              )}
+              {isLocalMode && appMode === 'chat' && (
                 <div className="alert-box info" style={{ maxWidth: '600px', marginTop: '1rem', backgroundColor: '#d1fae5', border: '2px solid #10b981' }}>
                   <p style={{ margin: 0, fontSize: '0.9em', marginBottom: '0.5rem' }}>
-                    🧪 <strong>Local Mode Active (TEST)</strong> - Using TinyLlama directly via HuggingFace transformers. 
+                    ?? <strong>Local Mode Active (TEST)</strong> - Using TinyLlama directly via HuggingFace transformers. 
                     Bypasses Petals DHT entirely. First inference may take time as model downloads.
                   </p>
                   <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9 }}>
-                    💡 <strong>Context Support:</strong> Conversation history is sent with each message for better coherence.
+                    ?? <strong>Context Support:</strong> Conversation history is sent with each message for better coherence.
                   </p>
                 </div>
               )}
               {isTestingMode && petalsEnvStatus.ready && (
                 <div className="alert-box info" style={{ maxWidth: '600px', marginTop: '1rem' }}>
                   <p style={{ margin: 0, fontSize: '0.9em', marginBottom: '0.5rem' }}>
-                    ⚡ <strong>Direct Petals Mode Active</strong> - Your messages connect directly to the Petals network, 
+                    ? <strong>Direct Petals Mode Active</strong> - Your messages connect directly to the Petals network, 
                     bypassing the backend server.
                   </p>
                   <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9, marginBottom: '0.5rem' }}>
-                    💡 <strong>Context Support:</strong> Conversation history is included for coherent multi-turn conversations.
+                    ?? <strong>Context Support:</strong> Conversation history is included for coherent multi-turn conversations.
                   </p>
                   <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9 }}>
-                    ⚠️ <strong>Note:</strong> GGUF models are not compatible. Use models like TinyLlama, Llama-2, or other standard HuggingFace models.
+                    ?? <strong>Note:</strong> GGUF models are not compatible. Use models like TinyLlama, Llama-2, or other standard HuggingFace models.
                   </p>
                 </div>
               )}
               {isSettingUpPetals && (
                 <div className="alert-box info" style={{ maxWidth: '600px', marginTop: '1rem' }}>
-                  <h4>🔧 Setting Up Direct Mode...</h4>
+                  <h4>?? Setting Up Direct Mode...</h4>
                   <p style={{ margin: 0, fontSize: '0.9em' }}>
                     Installing WSL and Petals. This may take a few minutes. 
                     Check the Setup Logs at the bottom for progress.
@@ -947,6 +1191,19 @@ function ChatPage() {
                 )}
               </div>
               <div className={`message ${msg.role === 'user' ? 'user' : msg.role === 'error' ? 'bot' : 'bot'}`}>
+                {msg.image && (
+                  <img 
+                    src={msg.image} 
+                    alt="User uploaded" 
+                    style={{ 
+                      maxWidth: '300px', 
+                      maxHeight: '300px', 
+                      borderRadius: '8px', 
+                      marginBottom: '0.5rem',
+                      border: '1px solid hsl(var(--border))'
+                    }} 
+                  />
+                )}
                 <p style={{...(msg.role === 'error' ? { color: 'hsl(var(--destructive-foreground))' } : {}),
                   // ADD these styles to enforce wrapping for long strings:
                   wordBreak: 'break-word', 
@@ -972,7 +1229,7 @@ function ChatPage() {
               <div className="message bot">
                 <p style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>
                   {currentStreamingMessage}
-                  <span className="streaming-cursor">▊</span>
+                  <span className="streaming-cursor">?</span>
                 </p>
               </div>
             </div>
@@ -1042,24 +1299,95 @@ function ChatPage() {
 
         {/* Chat Input Bar */}
         <div className="chat-input-bar">
+          {/* Image Preview */}
+          {imagePreview && appMode === 'research' && (
+            <div style={{ 
+              padding: '0.5rem 1rem', 
+              borderTop: '1px solid hsl(var(--border))',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '1rem',
+              backgroundColor: 'hsl(var(--card))'
+            }}>
+              <img 
+                src={imagePreview} 
+                alt="Preview" 
+                style={{ 
+                  maxWidth: '100px', 
+                  maxHeight: '100px', 
+                  borderRadius: '8px',
+                  border: '1px solid hsl(var(--border))'
+                }} 
+              />
+              <div style={{ flex: 1 }}>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'hsl(var(--foreground))' }}>
+                  {selectedImage?.name || 'Image attached'}
+                </p>
+                <p style={{ margin: 0, fontSize: '0.75rem', color: 'hsl(var(--muted-foreground))' }}>
+                  {selectedImage && `${(selectedImage.size / 1024).toFixed(1)} KB`}
+                </p>
+              </div>
+              <button
+                onClick={handleRemoveImage}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '0.5rem',
+                  color: 'hsl(var(--muted-foreground))',
+                }}
+                title="Remove image"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          )}
           <div className="chat-input-container">
-            <button className="icon-btn attachment-btn" title="Attach file (coming soon)" disabled>
-              <Paperclip size={18} />
-            </button>
+            {/* Image upload button for research mode, disabled paperclip for chat mode */}
+            {appMode === 'research' ? (
+              <>
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageSelect}
+                  style={{ display: 'none' }}
+                  id="image-upload"
+                />
+                <button 
+                  className="icon-btn attachment-btn" 
+                  title="Upload image" 
+                  onClick={() => imageInputRef.current?.click()}
+                  disabled={isStreaming}
+                >
+                  <ImageIcon size={18} />
+                </button>
+              </>
+            ) : (
+              <button className="icon-btn attachment-btn" title="Attach file (coming soon)" disabled>
+                <Paperclip size={18} />
+              </button>
+            )}
             <textarea
               ref={textareaRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={
-                modelsLoading ? 'Loading models...' :
-                modelsError ? 'Cannot chat - model loading failed' :
-                !selectedModel ? 'Select a model to begin' :
-                isStreaming ? 'Generating response...' :
-                `Message ${selectedModel.name}...`
+                appMode === 'research' 
+                  ? (isStreaming ? 'Researching...' : 'Ask a research question...')
+                  : (modelsLoading ? 'Loading models...' :
+                     modelsError ? 'Cannot chat - model loading failed' :
+                     !selectedModel ? 'Select a model to begin' :
+                     isStreaming ? 'Generating response...' :
+                     `Message ${selectedModel.name}...`)
               }
-              disabled={!selectedModel || modelsLoading || !!modelsError || isStreaming}
-              aria-label="Chat message input"
+              disabled={
+                appMode === 'research' 
+                  ? isStreaming 
+                  : (!selectedModel || modelsLoading || !!modelsError || isStreaming)
+              }
+              aria-label={appMode === 'research' ? 'Research question input' : 'Chat message input'}
               rows={1}
               style={{
                 resize: 'none',
@@ -1083,33 +1411,42 @@ function ChatPage() {
               <button
                 type="submit"
                 className="send-btn"
-                title="Send message"
-                disabled={!selectedModel || modelsLoading || !!modelsError || !inputValue.trim()}
-                aria-label="Send message"
-                onClick={handleSendMessage}
+                title={appMode === 'research' ? 'Start research' : 'Send message'}
+                disabled={
+                  appMode === 'research'
+                    ? !inputValue.trim()
+                    : (!selectedModel || modelsLoading || !!modelsError || !inputValue.trim())
+                }
+                aria-label={appMode === 'research' ? 'Start research' : 'Send message'}
+                onClick={handleUnifiedSend}
               >
                 <SendHorizontal size={18} />
               </button>
             )}
           </div>
           <div className="chat-input-footer">
-            {isLocalMode ? (
+            {appMode === 'research' ? (
+              <span>
+                ?? Deep Research Mode - AI-powered comprehensive answers
+                {imagePreview && ' ? Image attached'}
+              </span>
+            ) : isLocalMode ? (
               <span style={{ color: '#10b981' }}>
-                🧪 Local Mode (TEST) - Using HuggingFace transformers directly
+                ?? Local Mode (TEST) - Using HuggingFace transformers directly
               </span>
             ) : isTestingMode ? (
               <span style={{ color: 'hsl(var(--primary))' }}>
-                ⚡ Direct Petals Mode - Bypassing backend
+                ? Direct Petals Mode - Bypassing backend
               </span>
             ) : (
               <>
-                Powered by Torbiz distributed network · 
+                Powered by Torbiz distributed network ? 
                 {models.length > 0 && ` ${models.filter(m => m.available).length} models available`}
               </>
             )}
             {streamError && (
               <span style={{ color: 'hsl(var(--destructive-foreground))', marginLeft: '1rem' }}>
-                · {streamError}
+                ? {streamError}
               </span>
             )}
             {(isLocalMode || isTestingMode || petalsLogs.length > 0) && (
@@ -1126,7 +1463,7 @@ function ChatPage() {
                   color: 'hsl(var(--foreground))',
                 }}
               >
-                {showPetalsLogs ? '▼' : '▶'} {isLocalMode ? 'Local Logs' : 'Petals Logs'} {petalsLogs.length > 0 && `(${petalsLogs.length})`}
+                {showPetalsLogs ? '?' : '?'} {isLocalMode ? 'Local Logs' : 'Petals Logs'} {petalsLogs.length > 0 && `(${petalsLogs.length})`}
               </button>
             )}
           </div>
@@ -1150,7 +1487,7 @@ function ChatPage() {
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', position: 'sticky', top: 0, backgroundColor: 'hsl(var(--card))', paddingBottom: '0.5rem', borderBottom: '1px solid hsl(var(--border))' }}>
               <h4 style={{ margin: 0, fontSize: '0.85rem', color: 'hsl(var(--foreground))' }}>
-                {isLocalMode ? '🧪 Local Inference Logs' : '🔧 Petals Logs'}
+                {isLocalMode ? '?? Local Inference Logs' : '?? Petals Logs'}
               </h4>
               <button
                 onClick={() => setShowPetalsLogs(false)}
@@ -1163,7 +1500,7 @@ function ChatPage() {
                   padding: '4px',
                 }}
               >
-                ✕
+                ?
               </button>
             </div>
             <div style={{ fontSize: '0.75rem', lineHeight: '1.4', fontFamily: 'monospace' }}>
@@ -1203,11 +1540,11 @@ function ChatPage() {
                 }}
                 aria-label="Close"
               >
-                ✕
+                ?
               </button>
             )}
             
-            <h2 style={{ marginBottom: '1rem' }}>⚡ Direct Petals Mode</h2>
+            <h2 style={{ marginBottom: '1rem' }}>? Direct Petals Mode</h2>
             
             {!isSettingUpPetals ? (
               <>
@@ -1220,7 +1557,7 @@ function ChatPage() {
                 </div>
                 
                 <div className="alert-box warning" style={{ marginBottom: '1.5rem' }}>
-                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>🔧 Requirements</h4>
+                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>?? Requirements</h4>
                   <p style={{ margin: '0.5rem 0' }}>
                     Automatic installation of:
                   </p>
@@ -1230,10 +1567,10 @@ function ChatPage() {
                     <li><strong>Additional packages</strong> (dependencies)</li>
                   </ul>
                   <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em' }}>
-                    ⏱️ First-time setup: 5-10 minutes
+                    ?? First-time setup: 5-10 minutes
                   </p>
                   <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em', fontStyle: 'italic' }}>
-                    📝 macOS users: Homebrew must be installed first
+                    ?? macOS users: Homebrew must be installed first
                   </p>
                 </div>
                 
@@ -1241,7 +1578,7 @@ function ChatPage() {
                   className="modal-action-btn primary"
                   onClick={startPetalsSetup}
                 >
-                  🚀 Start Setup & Enable Direct Mode
+                  ?? Start Setup & Enable Direct Mode
                 </button>
                 
                 <button 
@@ -1259,7 +1596,7 @@ function ChatPage() {
             ) : (
               <>
                 <div className="alert-box info" style={{ marginBottom: '1rem' }}>
-                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>🔧 Setting Up...</h4>
+                  <h4 style={{ margin: 0, marginBottom: '0.5rem' }}>?? Setting Up...</h4>
                   <p style={{ margin: 0, fontSize: '0.9em' }}>
                     Installing environment and Petals. This may take several minutes.
                     Please don't close this window.

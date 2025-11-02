@@ -245,20 +245,31 @@ def main():
         # Let Petals handle its own imports - it knows which versions it needs
         logger.info("Petals will manage its own module imports")
         
-        # Import Server directly to have full control over parameters
-        from petals import Server
+        # Run the Petals server CLI
+        # This is the CORRECT way to host model shards
+        from petals.cli.run_server import main as run_server_main
+        
+        # Build the command line arguments for Petals server
+        server_args = [
+            "run_server",  # Program name
+            args.model_name,  # Model name is the first positional argument
+            "--public_name", f"torbiz-{args.node_token[:12]}",  # Identifier on the network
+        ]
+        
+        # CRITICAL FIX: Add environment variable to bypass strict DHT bootstrap
+        # This allows the server to start even if default bootstrap peers are offline
+        # The server will continue trying to connect in the background
+        os.environ["HIVEMIND_ENSURE_BOOTSTRAP_SUCCESS"] = "false"
         
         logger.info("="*60)
         logger.info("DHT BOOTSTRAP CONFIGURATION")
-        logger.info("Relaxed bootstrap mode enabled (force_reachable=True)")
+        logger.info("Relaxed bootstrap mode enabled (ensure_bootstrap_success=False)")
         logger.info("Server will start even if default bootstrap peers are offline")
-        logger.info("This is the recommended approach for restrictive networks")
+        logger.info("DHT connection will continue attempting in the background")
+        logger.info("This is the recommended workaround when bootstrap peers are unreachable")
         logger.info("="*60)
         
-        # Determine num_blocks for CPU mode
-        num_blocks = None
-        torch_dtype = None
-        
+        # Add device specification if not default
         if args.device == "cpu":
             # SIMPLE, PROVEN APPROACH - No more complex calculations
             # Based on user testing: 5 blocks stable, 10 blocks crash
@@ -303,17 +314,17 @@ def main():
                 logger.info("FINAL: Will host %d blocks on this CPU", num_blocks)
                 logger.info("="*60)
                 
-                torch_dtype = "float32"
+                server_args.extend(["--torch_dtype", "float32", "--num_blocks", str(num_blocks)])
                 
             except ImportError:
                 # Fallback if psutil not installed
                 logger.warning("psutil not available - defaulting to 5 blocks (install psutil for optimization)")
-                num_blocks = 5
-                torch_dtype = "float32"
+                server_args.extend(["--torch_dtype", "float32", "--num_blocks", "5"])
             except Exception as e:
                 logger.error("Error detecting RAM: %s - defaulting to 5 blocks", e)
-                num_blocks = 5
-                torch_dtype = "float32"
+                server_args.extend(["--torch_dtype", "float32", "--num_blocks", "5"])
+        
+        sys.argv = server_args
         
         logger.info("="*60)
         logger.info("✓✓✓ STARTING PETALS SERVER ✓✓✓")
@@ -321,27 +332,9 @@ def main():
         logger.info("✓ Server identity: torbiz-%s", args.node_token[:12])
         logger.info("="*60)
         
-        # Create server with force_reachable=True to bypass DHT bootstrap issues
-        server_kwargs = {
-            "initial_peers": [],  # Empty list to avoid default bootstrap peers that may be offline
-            "public_name": f"torbiz-{args.node_token[:12]}",
-            "force_reachable": True,  # CRITICAL: Bypass reachability check
-        }
-        
-        if num_blocks is not None:
-            server_kwargs["num_blocks"] = num_blocks
-        if torch_dtype is not None:
-            server_kwargs["torch_dtype"] = torch_dtype
-        
         # Run the server (this will block until the server stops)
         try:
-            server = Server(args.model_name, **server_kwargs)
-            logger.info("✓✓✓ SERVER CREATED SUCCESSFULLY ✓✓✓")
-            logger.info("Server is now running and hosting model blocks")
-            logger.info("Press Ctrl+C to stop sharing")
-            
-            # Run the server (blocks until shutdown)
-            server.run()
+            run_server_main()
         except ImportError as import_err:
             # Handle CPU-specific triton import errors gracefully
             # (On GPU, triton comes with PyTorch CUDA and won"t trigger this)

@@ -14,7 +14,7 @@ import { getVersion } from "@tauri-apps/api/app";
 export async function checkForUpdates() {
   try {
     console.log("[UPDATE] Starting update check...");
-    const currentPlatform = await platform();
+    const currentPlatform = platform();
     console.log("[UPDATE] Detected platform:", currentPlatform);
     
     if (currentPlatform === "windows") {

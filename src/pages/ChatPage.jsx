@@ -122,10 +122,10 @@ function ChatPage() {
   // Fetch research history when in research mode
   useEffect(() => {
     const fetchResearchHistory = async () => {
-      if (appMode === 'research' && user?.id) {
+      if (appMode === 'research' && user?.userId) {
         setResearchLoading(true);
         try {
-          const history = await getDeepResearchByClient(user.id);
+          const history = await getDeepResearchByClient(user.userId);
           setResearchHistory(history);
         } catch (error) {
           console.error('[RESEARCH] Failed to fetch history:', error);
@@ -136,7 +136,7 @@ function ChatPage() {
     };
 
     fetchResearchHistory();
-  }, [appMode, user?.id]);
+  }, [appMode, user?.userId]);
 
   // Auto-scroll to bottom when new messages arrive or streaming updates
   useEffect(() => {
@@ -259,7 +259,7 @@ function ChatPage() {
           console.log('[RESEARCH] Regeneration completed');
           setIsStreaming(false);
           // Refresh research history
-          getDeepResearchByClient(user.id).then(history => {
+          getDeepResearchByClient(user.userId).then(history => {
             setResearchHistory(history);
           }).catch(err => console.error('[RESEARCH] Failed to refresh history:', err));
         },
@@ -290,7 +290,7 @@ function ChatPage() {
       await deleteDeepResearch(researchId);
       
       // Refresh history
-      const history = await getDeepResearchByClient(user.id);
+      const history = await getDeepResearchByClient(user.userId);
       setResearchHistory(history);
       
       // If we're viewing the deleted research, go back
@@ -318,7 +318,7 @@ function ChatPage() {
       return;
     }
 
-    if (!user?.id) {
+    if (!user?.userId) {
       setStreamError('User session error. Please log in again.');
       return;
     }
@@ -350,7 +350,7 @@ function ChatPage() {
 
     try {
       const abortFn = await streamDeepResearch(
-        user.id,
+        user.userId,
         trimmedInput,
         selectedImage,
         // onToken callback
@@ -363,7 +363,7 @@ function ChatPage() {
           console.log('[RESEARCH] Stream completed');
           handleStreamComplete();
           // Refresh research history
-          getDeepResearchByClient(user.id).then(history => {
+          getDeepResearchByClient(user.userId).then(history => {
             setResearchHistory(history);
           }).catch(err => console.error('[RESEARCH] Failed to refresh history:', err));
         },
@@ -428,7 +428,7 @@ function ChatPage() {
     }
 
     // Only check user ID if NOT in testing or local mode (backend needs it, direct modes don't)
-    if (!isTestingMode && !isLocalMode && !user?.id) {
+    if (!isTestingMode && !isLocalMode && !user?.userId) {
       setStreamError('User session error. Please log in again.');
       return;
     }
@@ -544,7 +544,7 @@ function ChatPage() {
         abortFn = await streamInference(
           selectedModel.id,
           trimmedInput,
-          user.id,
+          user.userId,
           // onToken callback
           (token) => {
             streamingMessageRef.current += token; // Update ref

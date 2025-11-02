@@ -44,7 +44,7 @@
 
   --transition-smooth: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   
-  font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif, 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji';
   font-size: 16px;
   line-height: 1.6;
   font-weight: 400;
@@ -66,6 +66,8 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
+  /* Ensure emojis are rendered properly */
+  font-family: 'Inter', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif, 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji';
 }
 
 /* ===== GENERAL COMPONENTS ===== */
@@ -81,6 +83,11 @@ button {
 input, select, textarea {
   font-family: inherit;
   transition: var(--transition-smooth);
+}
+
+/* Ensure all elements inherit emoji font support */
+*, *::before, *::after {
+  font-family: inherit;
 }
 
 /* ===== AUTH PAGE ===== */

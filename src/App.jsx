@@ -50,13 +50,13 @@ function AppRoutes() {
   // Send hardware info when user logs in (but only once per session)
   useEffect(() => {
     // Ensure user exists and has an id before proceeding
-    if (user && user.id) {
+    if (user && user.userId) {
       const hardwareInfoSent = sessionStorage.getItem('hardwareInfoSent');
 
       if (!hardwareInfoSent) {
         const authToken = localStorage.getItem('authToken');
-        // Pass the user.id to the function
-        collectAndSendHardwareInfo(user.id, authToken)
+        // Pass the user.userId to the function
+        collectAndSendHardwareInfo(user.userId, authToken)
           .then((result) => {
             if (result.success) {
               console.log('Hardware info collected and sent successfully on login.');

@@ -428,9 +428,11 @@ pub async fn setup_macos_environment(
         emit_progress("checking_docker_image", "Checking Docker image for GPU sharing...", 88);
         
         // Get project root directory
-        let project_root = app.path()
+        let project_root_path = app.path()
             .app_config_dir()
-            .map_err(|e| format!("Failed to get app directory: {}", e))?
+            .map_err(|e| format!("Failed to get app directory: {}", e))?;
+        
+        let project_root = project_root_path
             .parent()
             .and_then(|p| p.parent())
             .and_then(|p| p.parent())

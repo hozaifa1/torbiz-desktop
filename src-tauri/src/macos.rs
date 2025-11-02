@@ -5,7 +5,7 @@
 use std::process::Command;
 
 #[cfg(target_os = "macos")]
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 #[cfg(target_os = "macos")]
 use crate::wsl::SetupProgress;
@@ -253,7 +253,7 @@ pub fn install_petals_macos() -> Result<(), String> {
     
     if !deps_output.status.success() {
         let stderr = String::from_utf8_lossy(&deps_output.stderr);
-        let stdout = String::from_utf8_lossy(&deps_output.stdout);
+        let _stdout = String::from_utf8_lossy(&deps_output.stdout);
         println!("[MACOS] Warning: Some dependencies failed to install: {}", stderr);
         // Don't fail here - peft/accelerate might already be installed via Petals
     } else {

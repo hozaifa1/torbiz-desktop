@@ -7,8 +7,6 @@ mod wsl;
 mod macos;
 mod petals;
 
-use tauri::Manager;
-
 use hardware::get_hardware_info;
 use oauth::start_oauth_server;
 use wsl::{setup_wsl_environment, setup_wsl_environment_client};

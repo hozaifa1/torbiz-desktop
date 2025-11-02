@@ -302,14 +302,18 @@ pub async fn start_petals_seeder(
             .unwrap_or_else(|_| "/tmp".to_string());
 
         // Build Docker run command
+        let scripts_mount = format!("{}:/app/scripts:ro", py_dir);
+        let cache_mount = format!("{}/.cache/huggingface:/root/.cache/huggingface", home_dir);
+        let logs_mount = format!("{}/.torbiz/logs:/root/.torbiz/logs", home_dir);
+        
         let mut docker_args = vec![
             "run",
             "--rm",  // Remove container after it stops
             "--name", "torbiz-petals-seeder",
             "--network", "host",  // Required for P2P DHT network
-            "-v", &format!("{}:/app/scripts:ro", py_dir),  // Mount Python scripts
-            "-v", &format!("{}/.cache/huggingface:/root/.cache/huggingface", home_dir),  // Cache models
-            "-v", &format!("{}/.torbiz/logs:/root/.torbiz/logs", home_dir),  // Persist logs
+            "-v", &scripts_mount,  // Mount Python scripts
+            "-v", &cache_mount,  // Cache models
+            "-v", &logs_mount,  // Persist logs
             "torbiz-petals-macos:latest",
             "python3", "/app/scripts/run_petals_seeder.py",
             "--model-name", &model_name,

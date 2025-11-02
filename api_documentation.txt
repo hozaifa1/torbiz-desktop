@@ -1,0 +1,290 @@
+
+API DOCUMENTATION (AUTO-GENERATED)
+---------------------------------
+NOTE (Blunt reminder): You're here to build and ship — focus on your goals: KAUST full scholarship, finish thesis, GRE/IELTS prep, and maintain daily research/work blocks. Don't waste time. Deadlines: EmoLLM project: Oct 2, Applications (various) — check your tracker. Today: do the mandatory 30m GRE and 1h thesis research. Done or not? Move on immediately if not.
+
+OVERVIEW
+--------
+Base: (not specified) — use your deployment host. All endpoints use Basic authorization unless noted.
+Content types: application/json unless otherwise specified.
+Date/time fields use ISO 8601 date-time (e.g., 2019-08-24T14:15:22Z).
+
+RESOURCES & ENDPOINTS
+---------------------
+
+1) CLIENT
+   Description: User / client management and auth endpoints.
+   Authorization: Basic
+
+   Endpoints:
+   - POST  /client/google-auth/
+     Description: Create or handle Google authentication.
+     Responses: 201
+
+   - GET   /client/list/
+     Description: List clients.
+     Responses: 200
+     Response schema: Array of objects with fields:
+       user: object (User)
+       phone_no: string|null (<= 12 chars)
+       user_token: string (non-empty)
+       user_image: integer [0..32767]
+       ip: string|null
+       terms_accepted: boolean|null
+       role: string Enum("user","gpu_provider","admin")
+       profile_image_url: string|null (uri)
+       is_gpu_provider_approved: boolean
+       provider_registration_date: string (date-time)
+     Example response:
+       [
+         {
+           "user": {},
+           "phone_no": "string",
+           "user_token": "string",
+           "user_image": 32767,
+           "ip": "string",
+           "terms_accepted": true,
+           "role": "user",
+           "profile_image_url": "http://example.com",
+           "is_gpu_provider_approved": true,
+           "provider_registration_date": "2019-08-24T14:15:22Z"
+         }
+       ]
+
+   - POST  /client/list/
+     Description: Create a client record.
+     Request body (application/json):
+       user: object (User) e.g. { "username": "string", "email": "user@example.com" }
+       phone_no: string|null <= 12 chars
+       user_image: integer [0..32767]
+       terms_accepted: boolean|null
+     Responses: 201
+     Example request:
+       {
+         "user": { "username": "string", "email": "user@example.com" },
+         "phone_no": "string",
+         "user_image": 32767,
+         "terms_accepted": true
+       }
+     Example response: same as GET list entry (with user id populated).
+
+   - GET   /client/list/{id}/
+     Description: Retrieve a client by id.
+     Path params: id (integer) required
+     Responses: 200
+     Response schema: same as single item in list.
+
+   - PUT   /client/list/{id}/
+     Description: Update (replace) client by id.
+     Path params: id (integer) required
+     Request body: same schema as POST /client/list/
+     Responses: 200
+
+   - PATCH /client/list/{id}/
+     Description: Partial update client by id.
+     Path params: id (integer) required
+     Request body: partial fields allowed same as POST
+     Responses: 200
+
+   - DELETE /client/list/{id}/
+     Description: Delete client by id.
+     Path params: id (integer) required
+     Responses: 204
+
+   - POST  /client/login/
+     Description: Login endpoint (creates session/token).
+     Responses: 201
+
+   - POST  /client/logout/
+     Description: Logout endpoint (destroy session).
+     Responses: 201
+
+   - POST  /client/password-reset/
+     Description: Initiate password reset flow.
+     Responses: 201
+
+   - POST  /client/register/
+     Description: Register new client.
+     Responses: 201
+
+   - POST  /client/reset-password/{uidb64}/{token}/
+     Description: Complete password reset with uid and token.
+     Path params: uidb64 (string), token (string)
+     Responses: 201
+
+2) DEEPRESEARCH
+   Description: Create and manage research jobs that stream AI answers. Supports optional image input.
+   Authorization: Basic
+
+   - GET  /deepresearch/
+     Description: List all DeepResearch entries (most recent first).
+     Responses: 200
+     Response schema: Array of objects:
+       id: integer
+       client: integer (client id)
+       question_text: string
+       answer_text: string|null
+       image: string|null (uri)
+       created_at: string (date-time)
+     Example response:
+       [
+         {
+           "id": 0,
+           "client": 0,
+           "question_text": "string",
+           "answer_text": "string",
+           "image": "http://example.com",
+           "created_at": "2019-08-24T14:15:22Z"
+         }
+       ]
+
+   - POST /deepresearch/
+     Description: Create new DeepResearch instance and stream AI response.
+     Request body (application/json):
+       client: integer (required) -- ID of the client
+       question_text: string (required)
+       image: optional (image file supported)
+     Responses: 201
+     Example request:
+       { "client": 0, "question_text": "string" }
+     Example response: returns created object with answer_text when available.
+
+   - GET  /deepresearch/by_client/
+     Description: Custom filter: list DeepResearch by client id (query param expected).
+     Responses: 200
+     Response schema: same as list endpoint.
+
+   - GET  /deepresearch/{id}/
+     Description: Retrieve a specific DeepResearch instance including generated answer.
+     Path params: id (integer)
+     Responses: 200
+
+   - PUT  /deepresearch/{id}/
+     Description: Update (replace) existing DeepResearch (streams AI response on update).
+     Request body: client (integer), question_text (string)
+     Responses: 200
+
+   - PATCH /deepresearch/{id}/
+     Description: Partial update DeepResearch (streams AI response on partial update).
+     Request body: client, question_text
+     Responses: 200
+
+   - DELETE /deepresearch/{id}/
+     Description: Delete a DeepResearch instance.
+     Responses: 204
+
+   - POST /deepresearch/{id}/regenerate/
+     Description: Regenerate the answer for an existing DeepResearch entry (re-run AI).
+     Path params: id (integer)
+     Request body: client (integer), question_text (string)
+     Responses: 201
+
+3) GPU
+   Description: GPU node registration and metadata.
+   Authorization: Basic
+
+   - GET  /gpu/list/
+     Description: List GPU nodes / records.
+     Responses: 200
+     Response schema: Array of objects with fields:
+       id, gpu_info, cpu_name, cpu_core, cpu_frequency, total_memory, total_swap, ram, os_name, os_version, user (integer)
+     Example response included.
+
+   - POST /gpu/list/
+     Description: Register a GPU record.
+     Request body (application/json): all fields required:
+       gpu_info, cpu_name, cpu_core, cpu_frequency, total_memory, total_swap, ram, os_name, os_version, user (integer)
+     Responses: 201
+
+   - GET  /gpu/list/{id}/
+     Description: Retrieve GPU record by id.
+     Path params: id (string)
+     Responses: 200
+
+   - PUT  /gpu/list/{id}/
+     Description: Update (replace) GPU record by id.
+     Request body: same as POST /gpu/list/
+     Responses: 200
+
+   - PATCH /gpu/list/{id}/
+     Description: Partial update GPU record by id.
+     Request body: same fields optional
+     Responses: 200
+
+   - DELETE /gpu/list/{id}/
+     Description: Delete GPU record.
+     Responses: 204
+
+4) INFERENCE
+   Description: Inference and streaming inference endpoints. Stores Q/A, model used, client reference.
+   Authorization: Basic
+
+   - GET  /inference/
+     Description: List inference requests.
+     Responses: 200
+     Response schema: Array of objects:
+       id, question_text, answer_text, desired_model, created_at, client
+     Example response provided.
+
+   - POST /inference/
+     Description: Create inference record (non-streaming).
+     Request body (application/json):
+       question_text: string (required)
+       answer_text: string (required)
+       desired_model: string (required)
+       client: integer (required)
+     Responses: 201
+
+   - POST /inference/stream/
+     Description: Create inference with streaming response.
+     Request body: same as above.
+     Responses: 201
+
+   - GET  /inference/{id}/
+     Description: Retrieve specific inference record.
+     Path params: id (integer)
+     Responses: 200
+
+   - PUT  /inference/{id}/
+     Description: Replace inference record.
+     Request body: question_text, answer_text, desired_model, client
+     Responses: 200
+
+   - PATCH /inference/{id}/
+     Description: Partial update inference record.
+     Request body: same schema (partial)
+     Responses: 200
+
+   - DELETE /inference/{id}/
+     Description: Delete inference record.
+     Responses: 204
+
+5) LLM_MODELS
+   Description: Model registration, heartbeat, deregistration, and listing endpoints for LLM / GPU nodes.
+   Authorization: Basic
+
+   - GET  /llm_models/all-models/
+     Description: List all available LLM models.
+     Responses: 200
+
+   - DELETE /llm_models/deregister/
+     Description: De-register a GPU node by deleting it from DB. Auth using node_token.
+     Responses: 204
+
+   - POST /llm_models/heartbeat/
+     Description: Heartbeat endpoint (node health / keepalive).
+     Responses: 201
+
+   - POST /llm_models/register/
+     Description: Register node/model with orchestrator.
+     Responses: 201
+
+USAGE NOTES & TIPS
+------------------
+- All request/response samples in this doc were taken from the provided specification and are illustrative.
+- Dates use ISO 8601. Use proper Basic auth header: Authorization: Basic <base64(user:pass)>.
+- For endpoints that stream AI responses (deepresearch/* and inference/stream/), expect chunked transfer or SSE depending on implementation.
+- Fields marked required must be provided in POST/PUT requests.
+- For file/image upload (deepresearch image), use multipart/form-data where supported.
+
+END

@@ -1398,3 +1398,36 @@ input, select, textarea {
 .loading-container p {
   color: hsl(var(--muted-foreground));
 }
+
+/* ===== DEEP RESEARCH VIEW ===== */
+
+.research-view-back-btn:hover {
+  background-color: hsl(var(--accent)) !important;
+  color: hsl(var(--accent-foreground)) !important;
+  transform: translateX(-2px);
+}
+
+.research-question-card {
+  transition: var(--transition-smooth);
+}
+
+.research-question-card:hover {
+  box-shadow: 0 4px 16px hsl(var(--primary) / 0.2);
+}
+
+.research-regenerate-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px hsl(var(--primary) / 0.3);
+}
+
+.research-answer-card {
+  transition: var(--transition-smooth);
+}
+
+.history-list li:hover {
+  background-color: hsl(var(--accent)) !important;
+}
+
+.history-list li button:hover {
+  color: hsl(var(--destructive)) !important;
+}

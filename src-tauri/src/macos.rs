@@ -55,24 +55,139 @@ pub fn check_docker_installed() -> bool {
 }
 
 #[cfg(target_os = "macos")]
-/// Check if Docker daemon is running
+/// Check if Docker daemon is running with multiple fallback methods and retries
 pub fn check_docker_running() -> bool {
-    match Command::new("docker").arg("info").output() {
+    check_docker_running_with_retries(3, 2)
+}
+
+#[cfg(target_os = "macos")]
+/// Check if Docker Desktop process is running
+pub fn check_docker_desktop_running() -> bool {
+    // Check if Docker.app is running
+    let output = Command::new("pgrep")
+        .arg("-f")
+        .arg("Docker.app")
+        .output();
+    
+    match output {
         Ok(output) => {
-            if output.status.success() {
-                println!("[MACOS] Docker daemon is running");
-                true
+            let is_running = output.status.success() && !output.stdout.is_empty();
+            if is_running {
+                println!("[MACOS] ✓ Docker Desktop process is running");
             } else {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                println!("[MACOS] Docker daemon not running: {}", stderr);
-                false
+                println!("[MACOS] ✗ Docker Desktop process is not running");
             }
+            is_running
         }
         Err(e) => {
-            println!("[MACOS] Failed to check Docker status: {}", e);
+            println!("[MACOS] Failed to check Docker Desktop process: {}", e);
             false
         }
     }
+}
+
+#[cfg(target_os = "macos")]
+/// Check if Docker daemon is running with retries (to handle startup delay)
+pub fn check_docker_running_with_retries(max_retries: u32, delay_seconds: u64) -> bool {
+    use std::thread;
+    use std::time::Duration;
+    
+    println!("[MACOS] Checking Docker daemon status (will retry {} times)...", max_retries);
+    
+    for attempt in 1..=max_retries {
+        println!("[MACOS] Attempt {}/{} to verify Docker daemon...", attempt, max_retries);
+        
+        // Method 1: Try docker info command
+        let docker_info = Command::new("docker").arg("info").output();
+        
+        match docker_info {
+            Ok(output) => {
+                if output.status.success() {
+                    println!("[MACOS] ✓ Docker daemon is running (verified via `docker info`)");
+                    return true;
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    println!("[MACOS] docker info failed (attempt {}): {}", attempt, stderr);
+                }
+            }
+            Err(e) => {
+                println!("[MACOS] docker command not found in PATH (attempt {}): {}", attempt, e);
+            }
+        }
+        
+        // Method 2: Try with full path to Docker CLI
+        let docker_paths = vec![
+            "/usr/local/bin/docker",
+            "/opt/homebrew/bin/docker",
+            "/Applications/Docker.app/Contents/Resources/bin/docker",
+        ];
+        
+        for docker_path in docker_paths {
+            if let Ok(output) = Command::new(docker_path).arg("info").output() {
+                if output.status.success() {
+                    println!("[MACOS] ✓ Docker daemon is running (verified via {})", docker_path);
+                    return true;
+                }
+            }
+        }
+        
+        // Method 3: Check if Docker.sock exists and try to connect
+        let docker_sock = std::path::Path::new("/var/run/docker.sock");
+        if docker_sock.exists() {
+            println!("[MACOS] Docker socket found at /var/run/docker.sock (attempt {})", attempt);
+            
+            // Try multiple times with the socket
+            if let Ok(output) = Command::new("docker")
+                .env("DOCKER_HOST", "unix:///var/run/docker.sock")
+                .arg("info")
+                .output()
+            {
+                if output.status.success() {
+                    println!("[MACOS] ✓ Docker daemon is running (verified via socket)");
+                    return true;
+                } else {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    println!("[MACOS] Socket exists but connection failed (attempt {}): {}", attempt, stderr);
+                }
+            }
+            
+            // Try with docker context
+            if let Ok(output) = Command::new("docker")
+                .arg("context")
+                .arg("ls")
+                .output()
+            {
+                if output.status.success() {
+                    let context_output = String::from_utf8_lossy(&output.stdout);
+                    println!("[MACOS] Docker context info (attempt {}):\n{}", attempt, context_output);
+                    
+                    // If we can list contexts, Docker CLI is working, try ps
+                    if let Ok(ps_output) = Command::new("docker").arg("ps").output() {
+                        if ps_output.status.success() {
+                            println!("[MACOS] ✓ Docker daemon is running (verified via docker ps)");
+                            return true;
+                        }
+                    }
+                }
+            }
+        } else {
+            println!("[MACOS] Docker socket not found at /var/run/docker.sock (attempt {})", attempt);
+        }
+        
+        // If this wasn't the last attempt, wait before retrying
+        if attempt < max_retries {
+            println!("[MACOS] Waiting {} seconds before retry...", delay_seconds);
+            thread::sleep(Duration::from_secs(delay_seconds));
+        }
+    }
+    
+    println!("[MACOS] ✗ Docker daemon not running after {} attempts", max_retries);
+    println!("[MACOS] Troubleshooting:");
+    println!("[MACOS] 1. Open Docker Desktop from Applications");
+    println!("[MACOS] 2. Wait for the whale icon to appear in menu bar (may take 30-60 seconds)");
+    println!("[MACOS] 3. Try clicking 'Share GPU' again");
+    println!("[MACOS] 4. Or use the manual setup option to bypass detection");
+    false
 }
 
 #[cfg(target_os = "macos")]
@@ -360,18 +475,65 @@ pub async fn setup_macos_environment(
         println!("[MACOS] Docker is installed");
         emit_progress("docker_ok", "Docker found", 25);
 
-        emit_progress("checking_docker_running", "Checking if Docker is running...", 30);
+        emit_progress("checking_docker_running", "Checking if Docker is running (this may take a few seconds)...", 30);
         
+        // First check if Docker Desktop app is running
+        let desktop_running = check_docker_desktop_running();
+        if !desktop_running {
+            emit_progress("docker_not_running", "Docker Desktop app not running", 32);
+            println!("[MACOS] Docker Desktop app is not running - user needs to start it");
+        }
+        
+        // Check if Docker daemon is running (with retries)
         if !check_docker_running() {
-            emit_progress("docker_not_running", "Docker daemon not running", 35);
-            return Err(format!(
-                "Docker is installed but not running.\n\n\
-                Please start Docker Desktop:\n\
-                1. Open Docker Desktop app from Applications\n\
-                2. Wait for the whale icon to appear in menu bar\n\
-                3. Click 'Share GPU' again\n\n\
-                Note: Direct inference will still work without Docker."
-            ));
+            emit_progress("docker_not_running", "Docker daemon not responding", 35);
+            
+            let error_msg = if desktop_running {
+                // Docker Desktop is running but daemon not responding
+                format!(
+                    "Docker Desktop is running but the daemon is not responding.\n\n\
+                    This usually happens when Docker is still starting up.\n\n\
+                    Please try:\n\
+                    1. Wait 30-60 seconds for Docker to fully start\n\
+                    2. Look for the whale icon in your menu bar\n\
+                    3. Click 'Share GPU' again\n\n\
+                    ⚠️ Still not working?\n\
+                    You can bypass auto-detection and set up manually:\n\
+                    1. Open Terminal\n\
+                    2. Run: cd {}\n\
+                    3. Run: ./build-docker-macos.sh\n\
+                    4. After successful build, click 'Skip Setup' button\n\n\
+                    Note: Direct inference will still work without Docker.", 
+                    app.path().app_config_dir()
+                        .ok().and_then(|p| p.parent()).and_then(|p| p.parent()).and_then(|p| p.parent())
+                        .and_then(|p| p.to_str())
+                        .unwrap_or("~/torbiz-desktop")
+                )
+            } else {
+                // Docker Desktop is not running at all
+                format!(
+                    "Docker Desktop is not running.\n\n\
+                    Please start Docker Desktop:\n\
+                    1. Open Docker Desktop app from Applications folder\n\
+                    2. Wait for the whale icon to appear in menu bar (30-60 seconds)\n\
+                    3. The whale icon should be steady (not animated)\n\
+                    4. Click 'Share GPU' again in Torbiz\n\n\
+                    ⚠️ Docker Desktop not installed?\n\
+                    Download from: https://www.docker.com/products/docker-desktop\n\n\
+                    ⚠️ Want to set up manually?\n\
+                    1. Make sure Docker Desktop is running\n\
+                    2. Open Terminal and run: cd {}\n\
+                    3. Run: ./build-docker-macos.sh\n\
+                    4. After successful build, click 'Skip Setup' button\n\n\
+                    Note: Direct inference will still work without Docker.", 
+                    app.path().app_config_dir()
+                        .ok().and_then(|p| p.parent()).and_then(|p| p.parent()).and_then(|p| p.parent())
+                        .and_then(|p| p.to_str())
+                        .unwrap_or("~/torbiz-desktop")
+                )
+            };
+            
+            return Err(error_msg);
         }
         
         println!("[MACOS] Docker daemon is running");

@@ -1,6 +1,48 @@
-# Dockerfile for Torbiz macOS GPU Sharing (CPU-Only Mode)
-# This containerizes the Petals environment using the EXACT same methodology as Windows WSL CPU-only mode
-# Package installation order is CRITICAL - matches the proven WSL approach
+# ==============================================================================
+# Dockerfile for Torbiz macOS Model Hosting (CPU-Only Mode)
+# ==============================================================================
+#
+# PURPOSE:
+#   - Hosts LLM model shards on macOS using Docker container
+#   - Uses CPU-only execution (macOS does NOT support GPU passthrough to Docker)
+#   - Follows the EXACT same package installation methodology as Windows WSL CPU-only mode
+#
+# WHY DOCKER ON macOS:
+#   - Isolates Python environment from macOS system Python
+#   - Consistent Linux environment (same as WSL)
+#   - Avoids macOS-specific dependency conflicts (especially with bitsandbytes)
+#   - Easy cleanup and reproducibility
+#   - Portable: Works on any Mac with Docker Desktop installed
+#
+# WHAT RUNS INSIDE:
+#   - Debian Linux (python:3.11-slim base)
+#   - Petals server (run_petals_seeder.py) with --device cpu
+#   - Python packages: petals, peft, accelerate, psutil
+#   - Network mode: host (required for P2P DHT connectivity)
+#
+# PACKAGE INSTALLATION ORDER (CRITICAL):
+#   1. Petals FIRST → installs its own compatible PyTorch & transformers versions
+#   2. peft, accelerate, psutil → additional hosting dependencies
+#   ⚠️ DO NOT install PyTorch or transformers separately - causes version conflicts
+#
+# HOW GPU SHARING WORKS ON macOS:
+#   1. User clicks "Share GPU" in Torbiz app
+#   2. App checks if Docker Desktop is running
+#   3. App builds this Docker image (if not already built)
+#   4. App runs: docker run --network host -v [mounts] torbiz-petals-macos:latest python3 /app/scripts/run_petals_seeder.py --device cpu
+#   5. Petals connects to P2P network and starts hosting model blocks
+#   6. Other users can connect to this node for distributed inference
+#
+# MANUAL SETUP OPTION:
+#   Users can build this image manually and bypass auto-detection:
+#   1. Ensure Docker Desktop is running (whale icon in menu bar)
+#   2. Open Terminal
+#   3. cd /path/to/torbiz-desktop
+#   4. ./build-docker-macos.sh
+#   5. Wait for build to complete (shows verification output)
+#   6. Return to Torbiz app and click "Skip Setup" button
+#
+# ==============================================================================
 
 FROM python:3.11-slim
 

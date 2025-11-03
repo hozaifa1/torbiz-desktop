@@ -788,33 +788,96 @@ function ShareGpuModal({ isOpen, onClose }) {
             <div className="alert-box info" style={{ textAlign: 'left' }}>
               <h4>
                 <Download size={18} />
-                First-Time Setup Required
+                First-Time Setup Required (macOS)
               </h4>
-              <p style={{ marginBottom: '0.5rem' }}>
-                To run Petals on macOS, we need to install Python and Petals library. This is a one-time process that will take 5-10 minutes.
+              <p style={{ marginBottom: '0.75rem' }}>
+                <strong>GPU Sharing</strong> on macOS uses Docker to run Petals in an isolated container.<br/>
+                <span style={{ fontSize: '0.85em', color: '#666' }}>
+                  (macOS doesn't support GPU passthrough to Docker, so Petals runs in CPU-only mode - same as Windows WSL)
+                </span>
               </p>
+              
+              <div style={{ backgroundColor: '#f0f7ff', padding: '0.75rem', borderRadius: '6px', marginBottom: '0.75rem' }}>
+                <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9em', fontWeight: '600' }}>
+                  📋 What happens during setup:
+                </p>
+                <ul style={{ margin: '0 0 0 1.5rem', fontSize: '0.85em' }}>
+                  <li><strong>Detects Docker Desktop</strong> - Must be installed and running first</li>
+                  <li><strong>Builds Docker image</strong> - Contains Petals + PyTorch + dependencies (~3GB)</li>
+                  <li><strong>Installs Python 3</strong> - For Direct Inference mode (chat without sharing GPU)</li>
+                  <li><strong>Verifies setup</strong> - Tests all components work correctly</li>
+                </ul>
+              </div>
+
               <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.9em' }}>
-                <strong>Prerequisites:</strong>
+                <strong>Before you begin:</strong>
               </p>
-              <ul style={{ margin: '0 0 0.5rem 1.5rem', fontSize: '0.9em' }}>
-                <li>Homebrew must be installed (<a href="https://brew.sh" target="_blank" rel="noopener noreferrer" style={{ color: '#1a73e8' }}>install from brew.sh</a>)</li>
-                <li>Stable internet connection</li>
+              <ul style={{ margin: '0 0 0.75rem 1.5rem', fontSize: '0.85em' }}>
+                <li><strong>Install Docker Desktop</strong> - <a href="https://www.docker.com/products/docker-desktop" target="_blank" rel="noopener noreferrer" style={{ color: '#1a73e8' }}>Download here</a></li>
+                <li><strong>Start Docker Desktop</strong> - Open the app and wait for the whale icon in menu bar (🐳)</li>
+                <li><strong>Ensure Docker is running</strong> - The whale icon should be steady, not animated</li>
+                <li>Homebrew (<a href="https://brew.sh" target="_blank" rel="noopener noreferrer" style={{ color: '#1a73e8' }}>brew.sh</a>) - Needed for Python installation</li>
+                <li>Stable internet connection - Setup downloads ~3GB of packages</li>
               </ul>
-              <p style={{ margin: '0', fontSize: '0.9em', fontStyle: 'italic', color: '#10b981' }}>
-                ✨ <strong>Apple Silicon detected:</strong> Petals will automatically use your Metal GPU for acceleration!
-              </p>
+
+              <details style={{ marginBottom: '0.75rem', fontSize: '0.85em' }}>
+                <summary style={{ cursor: 'pointer', fontWeight: '600', color: '#1a73e8' }}>
+                  🛠️ Advanced: Manual Docker Setup (click to expand)
+                </summary>
+                <div style={{ marginTop: '0.5rem', padding: '0.75rem', backgroundColor: '#f8f9fa', borderRadius: '4px', border: '2px solid #1a73e8' }}>
+                  <p style={{ margin: '0 0 0.5rem 0', fontWeight: '600' }}>
+                    If auto-setup fails or you prefer manual control:
+                  </p>
+                  <ol style={{ margin: '0 0 0.5rem 1.5rem', fontSize: '0.9em' }}>
+                    <li><strong>Make sure Docker Desktop is running</strong> (whale icon in menu bar)</li>
+                    <li>Open Terminal app</li>
+                    <li>Navigate to Torbiz directory: <code style={{ backgroundColor: '#e9ecef', padding: '2px 6px', borderRadius: '3px' }}>cd ~/torbiz-desktop</code></li>
+                    <li>Run the build script: <code style={{ backgroundColor: '#e9ecef', padding: '2px 6px', borderRadius: '3px' }}>./build-docker-macos.sh</code></li>
+                    <li>Wait for build to complete (5-10 minutes)</li>
+                    <li>Return to Torbiz and click <strong>"Skip Setup"</strong> button below</li>
+                  </ol>
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em', color: '#666' }}>
+                    💡 This builds the Docker image "torbiz-petals-macos:latest" with the same CPU-only configuration as auto-setup
+                  </p>
+                  <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85em', color: '#666' }}>
+                    🔍 To verify: Run <code style={{ backgroundColor: '#e9ecef', padding: '2px 6px', borderRadius: '3px' }}>docker images | grep torbiz</code>
+                  </p>
+                </div>
+              </details>
             </div>
-            <button 
-              className="modal-action-btn primary" 
-              onClick={handleMacosSetup}
-              style={{ marginBottom: '0.5rem' }}
-            >
-              <Download size={16} style={{ marginRight: '8px' }} />
-              Start Setup
-            </button>
-            <button className="modal-action-btn secondary" onClick={handleClose}>
-              Cancel
-            </button>
+            
+            <div style={{ display: 'flex', gap: '0.5rem', flexDirection: 'column' }}>
+              <button 
+                className="modal-action-btn primary" 
+                onClick={handleMacosSetup}
+              >
+                <Download size={16} style={{ marginRight: '8px' }} />
+                Auto Setup (Recommended)
+              </button>
+              <button 
+                className="modal-action-btn secondary" 
+                onClick={async () => {
+                  if (window.confirm('Are you sure you have manually built the Docker image?\n\nThe image "torbiz-petals-macos:latest" must exist for GPU sharing to work.')) {
+                    try {
+                      const { invoke } = await import('@tauri-apps/api/core');
+                      await invoke('mark_macos_setup_complete');
+                      setMacosSetupComplete(true);
+                      setStatus('wsl-ready');
+                      setMessage('Manual setup confirmed! You can now start sharing.');
+                    } catch (error) {
+                      console.error('Failed to mark setup complete:', error);
+                      setMessage('Failed to bypass setup. Please try again.');
+                    }
+                  }
+                }}
+                style={{ fontSize: '0.9em' }}
+              >
+                Skip Setup (I've Set Up Docker Manually)
+              </button>
+              <button className="modal-action-btn secondary" onClick={handleClose}>
+                Cancel
+              </button>
+            </div>
           </>
         )}
 

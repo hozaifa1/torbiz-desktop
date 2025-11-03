@@ -10,6 +10,9 @@ echo "Torbiz macOS Docker Image Builder"
 echo "CPU-Only Mode (WSL-Compatible)"
 echo "=========================================="
 echo ""
+echo "This script builds a Docker image for hosting"
+echo "Petals model shards on macOS devices."
+echo ""
 
 # Check if Docker is installed
 if ! command -v docker &> /dev/null; then
@@ -17,17 +20,42 @@ if ! command -v docker &> /dev/null; then
     echo ""
     echo "Please install Docker Desktop from:"
     echo "https://www.docker.com/products/docker-desktop"
+    echo ""
+    echo "After installation:"
+    echo "1. Open Docker Desktop app"
+    echo "2. Wait for whale icon in menu bar (🐳)"
+    echo "3. Run this script again"
     exit 1
 fi
 
 echo "✓ Docker found: $(docker --version)"
 echo ""
 
-# Check if Docker daemon is running
-if ! docker info &> /dev/null; then
+# Check if Docker daemon is running with retries
+echo "Checking if Docker daemon is running..."
+DOCKER_RUNNING=false
+for i in {1..3}; do
+    if docker info &> /dev/null; then
+        DOCKER_RUNNING=true
+        break
+    fi
+    if [ $i -lt 3 ]; then
+        echo "  Attempt $i/3: Docker not responding, waiting 3 seconds..."
+        sleep 3
+    fi
+done
+
+if [ "$DOCKER_RUNNING" = false ]; then
+    echo ""
     echo "❌ Error: Docker daemon is not running"
     echo ""
-    echo "Please start Docker Desktop and try again"
+    echo "Please start Docker Desktop:"
+    echo "1. Open Docker Desktop app from Applications"
+    echo "2. Wait for whale icon in menu bar (should be steady, not animated)"
+    echo "3. Run this script again"
+    echo ""
+    echo "💡 Tip: You can check Docker status by running:"
+    echo "   docker info"
     exit 1
 fi
 

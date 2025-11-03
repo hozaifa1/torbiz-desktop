@@ -1,5 +1,6 @@
-# Docker Compose configuration for Torbiz macOS GPU Sharing
+# Docker Compose configuration for Torbiz macOS GPU Sharing (CPU-Only Mode)
 # This file simplifies Docker container management
+# Configuration matches Windows WSL CPU-only approach
 
 version: '3.8'
 
@@ -10,12 +11,13 @@ services:
       dockerfile: Dockerfile.macos
     image: torbiz-petals-macos:latest
     container_name: torbiz-petals-seeder
-    network_mode: "host"  # Required for P2P DHT network communication
+    network_mode: "host"  # Required for P2P DHT network communication (same as WSL)
     volumes:
       - ./src-tauri/py:/app/scripts:ro  # Mount Python scripts as read-only
       - ~/.cache/huggingface:/root/.cache/huggingface  # Cache HuggingFace models
       - ~/.torbiz/logs:/root/.torbiz/logs  # Persist logs
     environment:
+      # CPU-only environment variables - matches WSL configuration
       - PYTHONUNBUFFERED=1
       - HF_HUB_DISABLE_TELEMETRY=1
       - DISABLE_BNB=1
@@ -23,5 +25,5 @@ services:
       - PEFT_DISABLE_BNB=1
       - TRANSFORMERS_DISABLE_BNB=1
     restart: unless-stopped
-    command: python3 --version  # Default command, will be overridden
+    command: python3 --version  # Default command, will be overridden by docker run
 

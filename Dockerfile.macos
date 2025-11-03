@@ -1,12 +1,13 @@
-# Dockerfile for Torbiz macOS GPU Sharing
-# This containerizes the Petals environment to avoid dependency issues on macOS
+# Dockerfile for Torbiz macOS GPU Sharing (CPU-Only Mode)
+# This containerizes the Petals environment using the EXACT same methodology as Windows WSL CPU-only mode
+# Package installation order is CRITICAL - matches the proven WSL approach
 
 FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Install system dependencies ONLY (no Python packages yet)
 RUN apt-get update && apt-get install -y \
     git \
     build-essential \
@@ -16,24 +17,23 @@ RUN apt-get update && apt-get install -y \
 # Upgrade pip
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
-# Install PyTorch (CPU version for macOS compatibility)
-RUN pip install --no-cache-dir torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
-
-# Install Petals from official GitHub repository
+# STEP 1: Install Petals FIRST (this installs its own compatible PyTorch and transformers versions)
+# This is the EXACT same approach as WSL: let Petals manage its core dependencies
 RUN pip install --no-cache-dir git+https://github.com/bigscience-workshop/petals
 
-# Install required dependencies for GPU sharing (hosting models)
+# STEP 2: Install ONLY the additional dependencies needed for hosting models
+# These are the extras that WSL installs separately: peft, accelerate
+# psutil is added for dynamic block calculation (used by run_petals_seeder.py)
 RUN pip install --no-cache-dir \
     peft \
     accelerate \
-    transformers \
-    psutil \
-    huggingface-hub
+    psutil
 
 # Create directory for scripts
 RUN mkdir -p /app/scripts
 
-# Environment variables to optimize Python
+# Environment variables - matches WSL CPU-only configuration
+# Note: run_petals_seeder.py also sets these at runtime (defense-in-depth)
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     HF_HUB_DISABLE_TELEMETRY=1 \
@@ -42,11 +42,12 @@ ENV PYTHONUNBUFFERED=1 \
     PEFT_DISABLE_BNB=1 \
     TRANSFORMERS_DISABLE_BNB=1
 
-# Verify installations
+# Verify installations - same checks as WSL
 RUN python3 -c "import petals; print('✓ Petals version:', petals.__version__)" && \
     python3 -c "import torch; print('✓ PyTorch version:', torch.__version__)" && \
     python3 -c "import peft; print('✓ peft installed')" && \
     python3 -c "import accelerate; print('✓ accelerate installed')" && \
+    python3 -c "import psutil; print('✓ psutil installed')" && \
     echo "✓ All dependencies verified successfully"
 
 # Default command (will be overridden by docker run)

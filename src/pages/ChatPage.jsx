@@ -653,13 +653,13 @@ function ChatPage() {
       console.log('[DIRECT-MODE-TOGGLE] Turning OFF');
       setIsTestingMode(false);
       setPetalsEnvStatus({ ready: false, needsSetup: false, platform: 'unknown', message: 'Direct Mode disabled' });
-      setPetalsLogs(prev => [...prev, '?? Direct Mode disabled']);
+      setPetalsLogs(prev => [...prev, '⚠️ Direct Mode disabled']);
       return;
     }
     
     // IMMEDIATE FEEDBACK - Set loading state before async check
     setIsCheckingPetals(true);
-    setPetalsLogs(['?? Checking Petals environment...']);
+    setPetalsLogs(['🔍 Checking Petals environment...']);
     setShowPetalsLogs(true); // Show logs panel immediately
     
     console.log('[DIRECT-MODE-TOGGLE] Checking environment...');
@@ -673,16 +673,16 @@ function ChatPage() {
         console.log('[DIRECT-MODE-TOGGLE] Petals ready, enabling Direct Mode');
         setIsTestingMode(true);
         setPetalsEnvStatus({ ready: true, needsSetup: false, platform: 'detected', message: 'Petals ready for inference' });
-        setPetalsLogs(['? Environment verified', '? Direct Mode enabled - ready for inference']);
+        setPetalsLogs(['✅ Environment verified', '✅ Direct Mode enabled - ready for inference']);
       } else {
         // Needs setup - open modal
         console.log('[DIRECT-MODE-TOGGLE] Petals not ready, showing setup modal');
-        setPetalsLogs(prev => [...prev, '?? Petals not installed', '?? Setup required']);
+        setPetalsLogs(prev => [...prev, '⚠️ Petals not installed', '⚠️ Setup required']);
         setShowSetupConfirmation(true);
       }
     } catch (error) {
       console.error('[DIRECT-MODE-TOGGLE] Check failed:', error);
-      setPetalsLogs(prev => [...prev, `? Check failed: ${error.message}`, '?? Setup may be required']);
+      setPetalsLogs(prev => [...prev, `❌ Check failed: ${error.message}`, '⚠️ Setup may be required']);
       setShowSetupConfirmation(true);
     } finally {
       // Clear loading state
@@ -693,7 +693,7 @@ function ChatPage() {
   // Actually start the setup after confirmation
   const startPetalsSetup = async () => {
     setIsSettingUpPetals(true);
-    setPetalsLogs(['?? Starting setup process...']);
+    setPetalsLogs(['🔧 Starting setup process...']);
     
     try {
       const { invoke } = await import('@tauri-apps/api/core');
@@ -703,33 +703,33 @@ function ChatPage() {
       const isWin = navigator.userAgent.includes('Windows');
       
       if (isMac) {
-        setPetalsLogs(prev => [...prev, '?? Detected macOS - setting up native environment...']);
+        setPetalsLogs(prev => [...prev, '🍎 Detected macOS - setting up native environment...']);
         
         // Setup macOS environment
         await invoke('setup_macos_environment');
         await invoke('mark_macos_setup_complete');
       } else if (isWin) {
-        setPetalsLogs(prev => [...prev, '?? Checking WSL installation...']);
+        setPetalsLogs(prev => [...prev, '🔍 Checking WSL installation...']);
         
         // Setup WSL environment for client inference (minimal dependencies)
         await invoke('setup_wsl_environment_client');
         await invoke('mark_wsl_setup_complete');
       } else {
-        setPetalsLogs(prev => [...prev, '?? Detected Linux - setting up environment...']);
+        setPetalsLogs(prev => [...prev, '🐧 Detected Linux - setting up environment...']);
         // For Linux, we assume Python and pip are already available
-        setPetalsLogs(prev => [...prev, '?? On Linux, please install Petals manually: pip install git+https://github.com/bigscience-workshop/petals']);
+        setPetalsLogs(prev => [...prev, 'ℹ️ On Linux, please install Petals manually: pip install git+https://github.com/bigscience-workshop/petals']);
         throw new Error('Linux setup not yet automated. Please install Petals manually.');
       }
       
-      setPetalsLogs(prev => [...prev, '? Environment and Petals installed successfully!']);
-      setPetalsLogs(prev => [...prev, '?? Verifying installation...']);
+      setPetalsLogs(prev => [...prev, '✅ Environment and Petals installed successfully!']);
+      setPetalsLogs(prev => [...prev, '🔍 Verifying installation...']);
       
       // Verify it's ready
       const isPetalsReady = await invoke('check_petals_inference_ready');
       
       if (isPetalsReady) {
-        setPetalsLogs(prev => [...prev, '? Direct Mode is ready!']);
-        setPetalsLogs(prev => [...prev, '? Enabling Direct Mode...']);
+        setPetalsLogs(prev => [...prev, '✅ Direct Mode is ready!']);
+        setPetalsLogs(prev => [...prev, '🚀 Enabling Direct Mode...']);
         
         // Wait a moment for user to see success
         await new Promise(resolve => setTimeout(resolve, 1000));
@@ -739,15 +739,15 @@ function ChatPage() {
         setPetalsEnvStatus({ ready: true, needsSetup: false, platform: 'detected', message: 'Petals ready for inference' });
         setShowPetalsLogs(true);
         setShowSetupConfirmation(false);
-        setPetalsLogs(['? Direct Mode enabled - ready for inference']);
+        setPetalsLogs(['✅ Direct Mode enabled - ready for inference']);
       } else {
-        setPetalsLogs(prev => [...prev, '?? Setup completed but verification failed']);
-        setPetalsLogs(prev => [...prev, '?? Try restarting the app or check the Share GPU button']);
+        setPetalsLogs(prev => [...prev, '⚠️ Setup completed but verification failed']);
+        setPetalsLogs(prev => [...prev, 'ℹ️ Try restarting the app or check the Share GPU button']);
       }
     } catch (error) {
       console.error('[DIRECT-MODE] Setup failed:', error);
-      setPetalsLogs(prev => [...prev, `? Setup failed: ${error}`]);
-      setPetalsLogs(prev => [...prev, '?? You can also use the Share GPU button to set up the environment']);
+      setPetalsLogs(prev => [...prev, `❌ Setup failed: ${error}`]);
+      setPetalsLogs(prev => [...prev, 'ℹ️ You can also use the Share GPU button to set up the environment']);
     } finally {
       setIsSettingUpPetals(false);
     }
@@ -1011,7 +1011,7 @@ function ChatPage() {
                         <span className="model-name">
                           {model.name} 
                           {!model.available && ' (Unavailable)'}
-                          {incompatibleWithDirectMode && ' ?? Not compatible with Direct Mode'}
+                          {incompatibleWithDirectMode && ' ⚠️ Not compatible with Direct Mode'}
                         </span>
                         <span className="model-provider">{model.provider}</span>
                         {model.minGpuMemory && (
@@ -1037,7 +1037,7 @@ function ChatPage() {
                 // Turn off other modes
                 if (!isLocalMode) {
                   setIsTestingMode(false);
-                  setPetalsLogs(['?? Local Mode - Using HuggingFace transformers directly']);
+                  setPetalsLogs(['💻 Local Mode - Using HuggingFace transformers directly']);
                   setShowPetalsLogs(true);
                 }
                 setIsLocalMode(!isLocalMode);
@@ -1088,7 +1088,7 @@ function ChatPage() {
                 </>
               ) : (
                 <>
-                  <span style={{ fontSize: '1.2em' }}>?</span>
+                  <span style={{ fontSize: '1.2em' }}>⚡</span>
                   <span>
                     {isTestingMode ? 'Direct Mode: ON' : 'Direct Mode'}
                   </span>
@@ -1364,7 +1364,7 @@ function ChatPage() {
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {selectedResearch.answer_text || ''}
                     </ReactMarkdown>
-                    <span className="streaming-cursor">?</span>
+                    <span className="streaming-cursor">▌</span>
                   </div>
                 ) : selectedResearch.answer_text ? (
                   <div className="markdown-content">
@@ -1410,18 +1410,18 @@ function ChatPage() {
                     Bypasses Petals DHT entirely. First inference may take time as model downloads.
                   </p>
                   <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9 }}>
-                    ?? <strong>Context Support:</strong> Conversation history is sent with each message for better coherence.
+                    ℹ️ <strong>Context Support:</strong> Conversation history is sent with each message for better coherence.
                   </p>
                 </div>
               )}
               {isTestingMode && petalsEnvStatus.ready && (
                 <div className="alert-box info" style={{ maxWidth: '600px', marginTop: '1rem' }}>
                   <p style={{ margin: 0, fontSize: '0.9em', marginBottom: '0.5rem' }}>
-                    ? <strong>Direct Petals Mode Active</strong> - Your messages connect directly to the Petals network, 
+                    ⚡ <strong>Direct Petals Mode Active</strong> - Your messages connect directly to the Petals network, 
                     bypassing the backend server.
                   </p>
                   <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9, marginBottom: '0.5rem' }}>
-                    ?? <strong>Context Support:</strong> Conversation history is included for coherent multi-turn conversations.
+                    ℹ️ <strong>Context Support:</strong> Conversation history is included for coherent multi-turn conversations.
                   </p>
                   <p style={{ margin: 0, fontSize: '0.85em', opacity: 0.9 }}>
                     ℹ️ <strong>Note:</strong> GGUF models are not compatible. Use models like TinyLlama, Llama-2, or other standard HuggingFace models.
@@ -1501,7 +1501,7 @@ function ChatPage() {
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {currentStreamingMessage}
                   </ReactMarkdown>
-                  <span className="streaming-cursor">?</span>
+                  <span className="streaming-cursor">▌</span>
                 </div>
               </div>
             </div>
@@ -1773,7 +1773,7 @@ function ChatPage() {
                   padding: '4px',
                 }}
               >
-                ?
+                ✕
               </button>
             </div>
             <div style={{ fontSize: '0.75rem', lineHeight: '1.4', fontFamily: 'monospace' }}>
@@ -1813,11 +1813,11 @@ function ChatPage() {
                 }}
                 aria-label="Close"
               >
-                ?
+                ✕
               </button>
             )}
             
-            <h2 style={{ marginBottom: '1rem' }}>? Direct Petals Mode</h2>
+            <h2 style={{ marginBottom: '1rem' }}>⚡ Direct Petals Mode</h2>
             
             {!isSettingUpPetals ? (
               <>

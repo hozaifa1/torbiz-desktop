@@ -6,6 +6,8 @@ import {
     MessageSquarePlus, Paperclip, SendHorizontal, Loader, AlertTriangle, StopCircle,
     User, Settings, Network, Search, MessageCircle, X, Image as ImageIcon, RefreshCw, Trash2, ArrowLeft
 } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 import HardwareInfoDisplay from '../components/HardwareInfoDisplay';
 import ShareGpuModal from '../components/ShareGpuModal';
@@ -1358,28 +1360,18 @@ function ChatPage() {
                   🤖 AI Research Answer
                 </h3>
                 {isStreaming ? (
-                  <div>
-                    <p style={{ 
-                      margin: 0, 
-                      lineHeight: 1.8,
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      overflowWrap: 'break-word'
-                    }}>
+                  <div className="markdown-content">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {selectedResearch.answer_text || ''}
-                      <span className="streaming-cursor">?</span>
-                    </p>
+                    </ReactMarkdown>
+                    <span className="streaming-cursor">?</span>
                   </div>
                 ) : selectedResearch.answer_text ? (
-                  <p style={{ 
-                    margin: 0, 
-                    lineHeight: 1.8,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    overflowWrap: 'break-word'
-                  }}>
-                    {selectedResearch.answer_text}
-                  </p>
+                  <div className="markdown-content">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {selectedResearch.answer_text}
+                    </ReactMarkdown>
+                  </div>
                 ) : (
                   <div style={{ textAlign: 'center', padding: '3rem', color: 'hsl(var(--muted-foreground))' }}>
                     <Loader size={24} className="spinner" style={{ display: 'inline-block', marginBottom: '1rem' }} />
@@ -1474,13 +1466,21 @@ function ChatPage() {
                     }} 
                   />
                 )}
-                <p style={{...(msg.role === 'error' ? { color: 'hsl(var(--destructive-foreground))' } : {}),
-                  // ADD these styles to enforce wrapping for long strings:
-                  wordBreak: 'break-word', 
-                  overflowWrap: 'break-word' 
-                }}>
-                  {msg.content}
-                </p>
+                {msg.role === 'assistant' ? (
+                  <div className="markdown-content">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {msg.content}
+                    </ReactMarkdown>
+                  </div>
+                ) : (
+                  <p style={{...(msg.role === 'error' ? { color: 'hsl(var(--destructive-foreground))' } : {}),
+                    // ADD these styles to enforce wrapping for long strings:
+                    wordBreak: 'break-word', 
+                    overflowWrap: 'break-word' 
+                  }}>
+                    {msg.content}
+                  </p>
+                )}
                 {msg.role === 'assistant' && msg.model && (
                   <span className="text-muted" style={{ fontSize: '0.75em', display: 'block', marginTop: '0.5rem' }}>
                     {msg.model}
@@ -1497,10 +1497,12 @@ function ChatPage() {
                 <img src="/tauri.svg" alt="AI Assistant" />
               </div>
               <div className="message bot">
-                <p style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}>
-                  {currentStreamingMessage}
+                <div className="markdown-content">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {currentStreamingMessage}
+                  </ReactMarkdown>
                   <span className="streaming-cursor">?</span>
-                </p>
+                </div>
               </div>
             </div>
           )}

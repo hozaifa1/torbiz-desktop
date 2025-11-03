@@ -2,7 +2,6 @@
 // WSL (Windows Subsystem for Linux) setup and utilities
 
 use serde::Serialize;
-use tauri::Emitter;
 
 #[cfg(target_os = "windows")]
 use std::process::Command;

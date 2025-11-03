@@ -488,6 +488,15 @@ pub async fn setup_macos_environment(
         if !check_docker_running() {
             emit_progress("docker_not_running", "Docker daemon not responding", 35);
             
+            // Get project root path for manual setup instructions
+            let project_path = app.path().app_config_dir()
+                .ok()
+                .and_then(|p| p.parent().map(|pp| pp.to_path_buf()))
+                .and_then(|p| p.parent().map(|pp| pp.to_path_buf()))
+                .and_then(|p| p.parent().map(|pp| pp.to_path_buf()))
+                .and_then(|p| p.to_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| "~/torbiz-desktop".to_string());
+            
             let error_msg = if desktop_running {
                 // Docker Desktop is running but daemon not responding
                 format!(
@@ -504,10 +513,7 @@ pub async fn setup_macos_environment(
                     3. Run: ./build-docker-macos.sh\n\
                     4. After successful build, click 'Skip Setup' button\n\n\
                     Note: Direct inference will still work without Docker.", 
-                    app.path().app_config_dir()
-                        .ok().and_then(|p| p.parent()).and_then(|p| p.parent()).and_then(|p| p.parent())
-                        .and_then(|p| p.to_str())
-                        .unwrap_or("~/torbiz-desktop")
+                    project_path
                 )
             } else {
                 // Docker Desktop is not running at all
@@ -526,10 +532,7 @@ pub async fn setup_macos_environment(
                     3. Run: ./build-docker-macos.sh\n\
                     4. After successful build, click 'Skip Setup' button\n\n\
                     Note: Direct inference will still work without Docker.", 
-                    app.path().app_config_dir()
-                        .ok().and_then(|p| p.parent()).and_then(|p| p.parent()).and_then(|p| p.parent())
-                        .and_then(|p| p.to_str())
-                        .unwrap_or("~/torbiz-desktop")
+                    project_path
                 )
             };
             

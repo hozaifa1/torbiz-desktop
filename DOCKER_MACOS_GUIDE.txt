@@ -1,30 +1,30 @@
 ================================================================================
-TORBIZ MACOS DOCKER SETUP GUIDE
+TORBIZ MACOS DOCKER SETUP GUIDE (Updated)
 ================================================================================
 
 OVERVIEW
 --------
-This guide explains how Docker is used to solve macOS GPU sharing dependency 
-issues in Torbiz.
+This guide explains how Docker is used to enable GPU sharing on macOS in Torbiz.
 
-WHY DOCKER?
------------
+WHY DOCKER ON macOS?
+--------------------
 On Windows: WSL provides a stable Linux environment where all Python 
 dependencies (petals, peft, accelerate, etc.) work perfectly.
 
 On macOS: Direct Python installation often has dependency conflicts, especially 
-with peft and accelerate packages needed for GPU sharing.
+with peft and accelerate packages needed for GPU sharing (hosting model shards).
 
 SOLUTION: Use Docker to create a containerized Linux environment on macOS,
-similar to how WSL works on Windows. This provides:
+exactly like how WSL works on Windows. This provides:
 - Isolated environment with all dependencies pre-installed
-- No conflicts with system Python
-- Consistent behavior across all macOS versions
+- No conflicts with macOS system Python
+- Consistent behavior across all macOS versions (Intel & Apple Silicon)
 - Easy to rebuild if something goes wrong
+- Portable and reproducible setup
 
 IMPORTANT: Direct inference (asking questions to models) still works without 
-Docker using your system Python. Docker is ONLY used for GPU sharing (hosting 
-model shards).
+Docker using your system Python. Docker is ONLY required for GPU sharing 
+(hosting model shards for the Petals P2P network).
 
 ================================================================================
 STEP-BY-STEP INSTALLATION GUIDE
@@ -34,140 +34,423 @@ STEP 1: INSTALL DOCKER DESKTOP
 -------------------------------
 1. Go to: https://www.docker.com/products/docker-desktop
 2. Download "Docker Desktop for Mac"
-   - Choose "Apple Silicon" if you have M1/M2/M3 Mac
+   - Choose "Apple Silicon" if you have M1/M2/M3/M4 Mac
    - Choose "Intel Chip" if you have older Intel Mac
 3. Open the downloaded .dmg file
 4. Drag Docker icon to Applications folder
 5. Open Docker Desktop from Applications
-6. Wait for Docker to start (you'll see a whale icon in the menu bar)
+6. Wait for Docker to start (you'll see a whale icon 🐳 in the menu bar)
 7. Docker will ask for permissions - grant them
+8. Wait until the whale icon is steady (not animated) - this means Docker is ready
 
-Docker Desktop is now installed!
+Docker Desktop is now installed and running!
 
-STEP 2: VERIFY DOCKER INSTALLATION
------------------------------------
+STEP 2: VERIFY DOCKER IS WORKING
+---------------------------------
 1. Open Terminal (Cmd + Space, type "Terminal")
 2. Run: docker --version
    Expected output: Docker version 24.x.x or similar
 3. Run: docker info
    Expected output: Information about Docker daemon (no errors)
+4. Look at your menu bar - you should see the whale icon 🐳 (steady, not spinning)
 
-If you see version info, Docker is working!
+If you see version info and no errors, Docker is working!
 
-STEP 3: FIRST-TIME SETUP IN TORBIZ
+STEP 3: CHOOSE YOUR SETUP METHOD
+---------------------------------
+Torbiz offers TWO ways to set up GPU sharing on macOS:
+
+🔵 OPTION A: AUTOMATIC SETUP (Recommended)
+   - Let Torbiz detect and configure everything
+   - Best for most users
+   - Takes 5-10 minutes
+
+🔧 OPTION B: MANUAL SETUP (Advanced)
+   - You build the Docker image yourself
+   - More control over the process
+   - Useful if auto-detection fails
+   - Also takes 5-10 minutes
+
+================================================================================
+OPTION A: AUTOMATIC SETUP (RECOMMENDED)
+================================================================================
+
+STEP 1: ENSURE DOCKER IS RUNNING
+---------------------------------
+Before starting:
+✓ Docker Desktop app is open
+✓ Whale icon 🐳 is in your menu bar
+✓ Whale icon is steady (not animated/spinning)
+
+If the whale is spinning, wait 30-60 seconds for Docker to finish starting.
+
+STEP 2: START AUTO-SETUP IN TORBIZ
 -----------------------------------
 1. Open Torbiz Desktop app
 2. Click "Share GPU" button
-3. The app will automatically:
-   ✓ Check if Docker is installed
-   ✓ Check if Docker is running
-   ✓ Install Python for direct inference (using Homebrew if needed)
+3. You'll see the setup screen with detailed instructions
+4. Click "Auto Setup (Recommended)" button
+5. Torbiz will automatically:
+   ✓ Check if Docker Desktop is running
+   ✓ Verify Docker daemon is responding (retries 3 times with delays)
+   ✓ Install Python 3 + Homebrew (if needed) for direct inference
    ✓ Install Petals for direct inference
-   ✓ Build the Docker image (5-10 minutes, ONE-TIME ONLY)
-   ✓ Verify everything is ready
+   ✓ Build the Docker image with all dependencies (~3GB download)
+   ✓ Verify everything works correctly
 
-Progress messages will show each step.
+STEP 3: MONITOR PROGRESS
+-------------------------
+You'll see progress messages like:
+- "Checking Docker installation..." (10%)
+- "Docker is running" (40%)
+- "Installing Python..." (60%)
+- "Building Docker image..." (90%)
+- "macOS environment ready!" (100%)
 
-STEP 4: START GPU SHARING
---------------------------
+This takes 5-10 minutes. DO NOT close the app during setup!
+
+STEP 4: START SHARING
+----------------------
 After setup completes:
-1. Select a model from the dropdown (e.g., "TinyLlama/TinyLlama-1.1B-Chat-v1.0")
-2. Click "Share GPU"
+1. Select a model from the dropdown (e.g., "TinyLlama 1.1B Chat")
+2. Click "Start Sharing"
 3. The app will:
    - Start a Docker container with Petals
-   - Download model shards (first time only)
+   - Download model shards (first time only, cached after)
    - Connect to the Petals P2P network
-   - Start serving model blocks to the network
+   - Start serving model blocks to other users
 
-You'll see log messages showing the progress.
+You'll see logs showing the connection progress.
 
-STEP 5: STOP GPU SHARING
+================================================================================
+OPTION B: MANUAL SETUP (ADVANCED)
+================================================================================
+
+USE THIS IF:
+- Auto-detection keeps failing
+- You want more control over the build process
+- You're comfortable with Terminal commands
+
+STEP 1: VERIFY DOCKER IS RUNNING
+---------------------------------
+1. Open Terminal
+2. Run: docker info
+3. Should show Docker daemon info (no errors)
+4. If you get errors, start Docker Desktop and wait for the whale icon 🐳
+
+STEP 2: BUILD DOCKER IMAGE MANUALLY
+------------------------------------
+1. Open Terminal
+2. Navigate to Torbiz directory:
+   cd ~/torbiz-desktop
+   (or wherever you have Torbiz installed)
+
+3. Run the build script:
+   ./build-docker-macos.sh
+
+4. The script will:
+   - Verify Docker is running (with retries)
+   - Build the Docker image "torbiz-petals-macos:latest"
+   - Install Petals, PyTorch, peft, accelerate in the image
+   - Verify all dependencies
+   - Show you the image size (~2-3GB)
+
+5. Wait for build to complete (5-10 minutes)
+   You'll see messages like:
+   ✓ Docker daemon is running
+   Building Docker image...
+   Step 1/8: FROM python:3.11-slim
+   ...
+   ✓ Docker image built successfully!
+   ✓ All dependencies verified
+
+STEP 3: VERIFY THE BUILD
 -------------------------
-When you want to stop sharing:
-1. Click "Stop Sharing" button
-2. The Docker container will stop gracefully
-3. Your GPU/CPU is no longer being used
+Run: docker images | grep torbiz
+You should see:
+  torbiz-petals-macos   latest   [image-id]   [size]   [time]
+
+If you see this, the build was successful!
+
+STEP 4: TELL TORBIZ TO USE YOUR IMAGE
+--------------------------------------
+1. Return to Torbiz app
+2. Click "Share GPU" button
+3. When you see the setup screen, click "Skip Setup (I've Set Up Docker Manually)"
+4. Confirm that you've built the Docker image
+5. Torbiz will mark setup as complete
+
+STEP 5: START SHARING
+----------------------
+Now you can select a model and click "Start Sharing" - it will use your 
+manually-built Docker image!
 
 ================================================================================
 TROUBLESHOOTING
 ================================================================================
 
-PROBLEM: "Docker is not running"
-SOLUTION: 
-1. Open Docker Desktop app from Applications
-2. Wait for the whale icon to appear in menu bar
-3. Try "Share GPU" again
-
-PROBLEM: "Docker image not found"
+🔴 PROBLEM: "Docker is not running" - But I opened Docker Desktop!
 SOLUTION:
-1. Click "Share GPU" button again
-2. The app will rebuild the Docker image
-3. Wait 5-10 minutes for the build to complete
+This usually means Docker Desktop is still starting up. The new detection 
+system retries 3 times with delays, but sometimes Docker takes longer.
 
-PROBLEM: "Cannot connect to Docker daemon"
-SOLUTION:
-1. Restart Docker Desktop
-2. If that doesn't work, reinstall Docker Desktop
-3. Make sure to grant all permissions Docker asks for
+Try this:
+1. Look at your menu bar - is the whale icon 🐳 steady or spinning?
+2. If spinning: Wait 30-60 seconds for Docker to finish starting
+3. If steady: Docker is ready! Click "Share GPU" again
+4. If still failing: Use Manual Setup (Option B above)
 
-PROBLEM: GPU sharing fails with Python errors
+The app now checks BOTH:
+- If Docker Desktop app is running (checks process)
+- If Docker daemon is responding (retries with delays)
+
+💡 TIP: Wait until the whale icon is completely steady before clicking "Share GPU"
+
+---
+
+🔴 PROBLEM: Auto-setup keeps failing with "Docker daemon not responding"
 SOLUTION:
-This shouldn't happen anymore since everything runs in Docker!
-If you still see errors:
+1. Make sure Docker Desktop is fully started (whale icon steady)
+2. Open Terminal and run: docker info
+3. If you see errors, restart Docker Desktop:
+   - Quit Docker Desktop completely (Docker menu → Quit Docker Desktop)
+   - Wait 5 seconds
+   - Open Docker Desktop again
+   - Wait for whale icon to become steady
+   - Try "Share GPU" again
+4. If still failing, use Manual Setup (Option B) to bypass auto-detection
+
+---
+
+🔴 PROBLEM: "Docker image not found" after successful setup
+SOLUTION:
+The Docker image may have been deleted. Rebuild it:
+
+Option 1 - Let Torbiz rebuild:
+1. Click "Share GPU" button
+2. The app will detect missing image and rebuild automatically
+
+Option 2 - Manual rebuild:
 1. Open Terminal
-2. Run: docker system prune -a
-3. This removes all Docker images/containers
-4. Restart Torbiz and click "Share GPU" to rebuild
+2. cd ~/torbiz-desktop
+3. ./build-docker-macos.sh
+4. Wait for build to complete
+5. Click "Skip Setup" in Torbiz
 
-PROBLEM: Direct inference not working
+---
+
+🔴 PROBLEM: "Cannot connect to Docker daemon"
 SOLUTION:
-Direct inference doesn't use Docker, it uses system Python.
+Docker Desktop is not running or has crashed.
+
+1. Check if Docker Desktop is in Applications folder
+2. Open Docker Desktop
+3. Wait for whale icon 🐳 in menu bar
+4. If Docker won't start:
+   - Restart your Mac
+   - If still broken, reinstall Docker Desktop
+   - Make sure you grant all permissions Docker asks for
+
+---
+
+🔴 PROBLEM: GPU sharing fails with Python errors inside Docker
+SOLUTION:
+This is rare since Docker contains all dependencies, but if it happens:
+
+1. Delete the Docker image:
+   docker rmi torbiz-petals-macos:latest
+
+2. Clear Docker cache:
+   docker system prune -a
+   (Type 'y' when asked to confirm)
+
+3. Rebuild from scratch:
+   - Auto Setup: Click "Share GPU" → "Auto Setup"
+   - Manual Setup: Run ./build-docker-macos.sh
+
+---
+
+🔴 PROBLEM: Direct inference (chat) not working
+SOLUTION:
+Direct inference uses system Python (not Docker).
+
 1. Make sure Homebrew is installed: https://brew.sh
-2. The app will automatically install Python and Petals
-3. If it fails, manually install:
+2. The app should auto-install Python and Petals
+3. If auto-install fails, do it manually:
    brew install python@3.11
    pip3 install git+https://github.com/bigscience-workshop/petals
+
+4. Verify installation:
+   python3 -c "import petals; print('OK')"
+   Should print: OK
+
+---
+
+🔴 PROBLEM: "Permission denied" errors with Docker
+SOLUTION:
+1. Make sure you granted all permissions when Docker Desktop first started
+2. Try running Docker Desktop as admin (shouldn't be needed, but worth trying)
+3. Check System Preferences → Security & Privacy → Privacy → Full Disk Access
+   - Make sure Docker Desktop is in the list and checked
+
+---
+
+🔴 PROBLEM: Want to completely start over
+SOLUTION:
+Full reset procedure:
+
+1. Stop all Docker containers:
+   docker stop $(docker ps -aq)
+
+2. Remove Torbiz Docker image:
+   docker rmi torbiz-petals-macos:latest
+
+3. Clean Docker cache:
+   docker system prune -a
+
+4. In Torbiz app data, delete setup flag:
+   rm -rf ~/Library/Application\ Support/com.torbiz.app/
+
+5. Restart Torbiz app
+
+6. Click "Share GPU" and start fresh with Auto Setup or Manual Setup
 
 ================================================================================
 TECHNICAL DETAILS
 ================================================================================
 
+WHAT HAPPENS DURING AUTO-SETUP?
+--------------------------------
+1. Docker Desktop Detection:
+   - Checks if Docker CLI is in PATH
+   - Checks common Docker installation paths
+   - Checks if Docker.app process is running (using pgrep)
+
+2. Docker Daemon Verification (with retries):
+   - Runs: docker info (attempt 1)
+   - If fails: waits 2 seconds, tries again (attempt 2)
+   - If fails: waits 2 seconds, tries again (attempt 3)
+   - Also tries: docker context ls, docker ps as fallbacks
+   - Checks if Docker socket exists: /var/run/docker.sock
+
+3. Python & Petals Installation (for direct inference):
+   - Checks if Python 3.10+ is installed
+   - If not: installs via Homebrew
+   - Installs: pip install git+https://github.com/bigscience-workshop/petals
+
+4. Docker Image Build:
+   - Uses: Dockerfile.macos
+   - Base image: python:3.11-slim (Debian Linux)
+   - Installation order (critical):
+     a) System dependencies (git, build-essential, curl)
+     b) Petals (installs its own PyTorch + transformers)
+     c) Additional hosting dependencies (peft, accelerate, psutil)
+   - ⚠️ Order matters! Installing PyTorch separately causes version conflicts
+
+5. Verification:
+   - Checks Docker image exists: docker images -q torbiz-petals-macos:latest
+   - Tests dependencies: docker run ... python3 -c "import petals; import peft; ..."
+
+---
+
 WHAT HAPPENS WHEN YOU SHARE GPU?
 ---------------------------------
-1. Torbiz checks Docker is running
-2. Runs: docker run --rm --name torbiz-petals-seeder --network host \
-        -v /path/to/scripts:/app/scripts:ro \
-        -v ~/.cache/huggingface:/root/.cache/huggingface \
-        -v ~/.torbiz/logs:/root/.torbiz/logs \
-        torbiz-petals-macos:latest \
-        python3 /app/scripts/run_petals_seeder.py --model-name <model> --node-token <token>
-3. Docker container runs the Python script with all dependencies
-4. Container connects to Petals P2P network and serves model blocks
+When you click "Start Sharing":
+
+1. Docker Detection:
+   - Verifies Docker is still running
+   - Verifies Docker image still exists
+
+2. Container Launch:
+   docker run --rm \
+     --name torbiz-petals-seeder \
+     --network host \
+     -v /path/to/py:/app/scripts:ro \
+     -v ~/.cache/huggingface:/root/.cache/huggingface \
+     -v ~/.torbiz/logs:/root/.torbiz/logs \
+     torbiz-petals-macos:latest \
+     python3 /app/scripts/run_petals_seeder.py \
+       --model-name <model-id> \
+       --node-token <your-token> \
+       --device cpu
+
+3. Inside Container:
+   - Petals connects to P2P DHT network
+   - Downloads model shards (cached in ~/.cache/huggingface)
+   - Loads blocks into memory
+   - Announces availability to network
+   - Starts serving inference requests from other users
+
+4. Logs:
+   - Streamed to Torbiz app in real-time
+   - Also saved to: ~/.torbiz/logs/petals_seeder.log
+
+---
 
 DOCKER VOLUMES EXPLAINED
 -------------------------
-- /path/to/scripts → Your Python scripts (mounted read-only)
-- ~/.cache/huggingface → HuggingFace model cache (persisted on your Mac)
-- ~/.torbiz/logs → Log files (persisted on your Mac)
+Three directories are mounted into the container:
 
-This means:
-- Model downloads are cached (not re-downloaded each time)
-- Logs are saved on your Mac (can view them later)
-- Scripts are always up-to-date (mounted from app)
+1. Scripts Volume (Read-Only):
+   Host: /Applications/Torbiz.app/Contents/Resources/py/
+   Container: /app/scripts/
+   Purpose: Python scripts (run_petals_seeder.py)
+   Why read-only: Security - container can't modify app files
+
+2. Model Cache Volume:
+   Host: ~/.cache/huggingface/
+   Container: /root/.cache/huggingface/
+   Purpose: Downloaded model weights (10-50GB depending on model)
+   Why mounted: So models aren't re-downloaded each time
+
+3. Logs Volume:
+   Host: ~/.torbiz/logs/
+   Container: /root/.torbiz/logs/
+   Purpose: Petals log files
+   Why mounted: So you can view logs even after container stops
+
+Benefits:
+✓ Models persist across container restarts
+✓ Logs are accessible from macOS Finder
+✓ Scripts are always up-to-date with app version
+
+---
+
+WHY CPU-ONLY MODE ON macOS?
+----------------------------
+Docker on macOS does NOT support GPU passthrough. This means:
+- Docker containers cannot access your Mac's GPU
+- Petals runs with --device cpu inside the container
+- Uses your Mac's CPU + RAM to host model shards
+
+This is exactly the same as Windows WSL CPU-only mode!
+
+Performance:
+- Modern Macs (especially Apple Silicon) have powerful CPUs
+- You can still host lightweight models (TinyLlama, Gemma 2B, Phi-3 Mini)
+- Larger models may be slower but still work
+- Your contribution helps the network even if it's CPU-only!
+
+---
 
 DOCKER VS SYSTEM PYTHON
 ------------------------
 GPU Sharing (run_petals_seeder.py):
-✓ Uses Docker container
-✓ All dependencies (petals, peft, accelerate) pre-installed
-✓ No conflicts with system Python
-✓ Reproducible environment
+✓ Runs in Docker container
+✓ Uses: petals, peft, accelerate, torch
+✓ Requires Docker Desktop running
+✓ Isolated from system Python
 
 Direct Inference (run_petals_inference.py):
-✓ Uses system Python 3
-✓ Only needs petals + torch (no peft/accelerate)
-✓ Faster to start (no Docker overhead)
+✓ Runs with system Python 3
+✓ Uses: petals, torch only (no peft/accelerate)
+✓ Faster startup (no Docker overhead)
 ✓ Works even if Docker is not installed
+
+Why the difference?
+- GPU sharing needs peft/accelerate (complex dependencies)
+- Direct inference just needs petals client (simpler)
+- Isolating GPU sharing in Docker prevents system-wide conflicts
 
 ================================================================================
 DOCKER COMMANDS (FOR ADVANCED USERS)
@@ -179,78 +462,222 @@ View running containers:
 View all containers (including stopped):
     docker ps -a
 
+Check if Torbiz container is running:
+    docker ps | grep torbiz-petals-seeder
+
 Stop the Torbiz container manually:
     docker stop torbiz-petals-seeder
 
-View Docker images:
-    docker images
+View Torbiz Docker images:
+    docker images | grep torbiz
 
 Remove Torbiz Docker image:
     docker rmi torbiz-petals-macos:latest
 
 Rebuild Docker image manually:
-    cd /path/to/torbiz-desktop
+    cd ~/torbiz-desktop
     docker build -f Dockerfile.macos -t torbiz-petals-macos:latest .
 
 View container logs in real-time:
     docker logs -f torbiz-petals-seeder
 
+View last 50 lines of logs:
+    docker logs --tail 50 torbiz-petals-seeder
+
 Enter running container (for debugging):
     docker exec -it torbiz-petals-seeder bash
+    # Inside container, you can run:
+    # python3 --version
+    # pip list
+    # python3 -c "import petals; print(petals.__version__)"
 
-Clean up all Docker resources:
+Check Docker disk usage:
+    docker system df
+
+Clean up all Docker resources (nuclear option):
     docker system prune -a
+    # WARNING: This removes ALL Docker images/containers, not just Torbiz!
+
+Verify Docker image dependencies:
+    docker run --rm torbiz-petals-macos:latest python3 -c "import petals; import peft; import accelerate; print('All OK')"
 
 ================================================================================
-COMPARISON: WINDOWS VS MACOS
+COMPARISON: WINDOWS WSL VS MACOS DOCKER
 ================================================================================
 
-                    WINDOWS (WSL)           MACOS (Docker)
-                    -------------           ---------------
-Environment:        WSL2 Linux              Docker Container
-Python Location:    ~/.torbiz_venv          Container Python
-Dependencies:       Installed in WSL        Pre-built in image
-GPU Sharing:        Works directly          Via Docker
-Direct Inference:   Via WSL                 Via system Python
-Model Cache:        WSL filesystem          Mac filesystem
+                    WINDOWS (WSL2)          MACOS (Docker)
+                    --------------          ---------------
+Environment:        WSL2 Linux              Docker Container (Linux)
+Python Location:    ~/.torbiz_venv          Container /usr/local/bin/python3
+Dependencies:       Installed in WSL        Pre-built in Docker image
+GPU Sharing:        Via WSL (NVIDIA GPU)    Via Docker (CPU-only)
+Direct Inference:   Via WSL Python          Via macOS system Python
+Model Cache:        WSL filesystem          Mac filesystem (mounted)
 Setup Time:         5-10 minutes            5-10 minutes
 Reliability:        Very High               Very High
+Rebuild Process:    Run setup again         Run ./build-docker-macos.sh
+Disk Space:         ~3GB (in WSL)           ~3GB (in Docker)
 
-Both solutions provide the same functionality with the same level of stability!
+Both solutions provide identical functionality and reliability!
+
+The only difference: Windows can use NVIDIA GPUs if present, macOS uses CPU.
+
+================================================================================
+NEW FEATURES (Recent Updates)
+================================================================================
+
+✨ IMPROVED DOCKER DETECTION (November 2024)
+--------------------------------------------
+The app now has much better Docker detection:
+
+1. RETRY LOGIC:
+   - Attempts to detect Docker 3 times
+   - Waits 2 seconds between attempts
+   - Handles cases where Docker is still starting up
+
+2. MULTIPLE DETECTION METHODS:
+   - Checks if Docker CLI command works
+   - Checks common installation paths:
+     * /usr/local/bin/docker
+     * /opt/homebrew/bin/docker
+     * /Applications/Docker.app/Contents/Resources/bin/docker
+   - Checks if Docker.app process is running (pgrep -f Docker.app)
+   - Checks if Docker socket exists (/var/run/docker.sock)
+   - Tries docker context and docker ps as fallbacks
+
+3. BETTER ERROR MESSAGES:
+   - Tells you if Docker Desktop app isn't running
+   - Tells you if Docker Desktop is running but daemon not responding
+   - Provides specific troubleshooting steps
+   - Mentions manual setup option in error messages
+
+OLD BEHAVIOR: Failed immediately if docker info didn't work
+NEW BEHAVIOR: Retries multiple times with different methods
+
+---
+
+✨ MANUAL SETUP BYPASS OPTION
+------------------------------
+New "Skip Setup" button allows you to:
+- Build Docker image manually in Terminal
+- Bypass auto-detection entirely
+- Have full control over the build process
+
+Perfect for:
+- Cases where auto-detection keeps failing
+- Advanced users who want control
+- Troubleshooting Docker issues
+- Custom Docker configurations
+
+How to use:
+1. Build image: ./build-docker-macos.sh
+2. Click "Skip Setup (I've Set Up Docker Manually)" in Torbiz
+3. Confirm you've built the image
+4. Start sharing immediately
+
+The app will trust that you've set everything up correctly.
+
+---
+
+✨ ENHANCED SETUP GUIDE IN APP
+-------------------------------
+The setup modal now shows:
+- Clear "Before you begin" checklist
+- Step-by-step instructions with emoji icons (🐳)
+- Expandable "Advanced: Manual Docker Setup" section
+- Better formatting with code blocks
+- Verification commands to check your setup
+
+Old guide: Basic text instructions
+New guide: Interactive, detailed, with multiple paths
+
+---
+
+✨ IMPROVED BUILD SCRIPT
+-------------------------
+build-docker-macos.sh now includes:
+- Retry logic for Docker daemon detection (matches app behavior)
+- Better error messages
+- Tips for troubleshooting
+- Verification of image after build
+
+Old script: Simple build, basic checks
+New script: Robust detection, helpful guidance
 
 ================================================================================
 FAQ
 ================================================================================
 
-Q: Do I need Docker for everything?
-A: No! Only for GPU sharing. Direct inference uses system Python.
+Q: Do I need Docker for everything in Torbiz?
+A: No! Only for GPU sharing (hosting model shards). Direct inference (asking 
+   questions) uses system Python and works without Docker.
+
+Q: Why does Docker detection sometimes fail even though Docker is running?
+A: Docker Desktop can take 30-60 seconds to fully start after you open it. The 
+   app now retries 3 times with delays, but very slow startups may still fail. 
+   Solution: Wait until whale icon 🐳 is steady, or use Manual Setup.
+
+Q: Can I use Manual Setup even if auto-detection works?
+A: Yes! Manual Setup gives you more control and lets you see exactly what's 
+   being built. Use whichever method you prefer.
 
 Q: Does Docker slow down GPU sharing?
-A: No significant performance impact. Docker container runs natively on macOS.
+A: Minimal overhead. The container runs natively on macOS with near-native 
+   performance. Model inference happens inside the container efficiently.
 
-Q: Can I use Docker Desktop for other projects?
-A: Yes! Docker is useful for many development projects.
+Q: Can I use Docker Desktop for other projects while Torbiz is running?
+A: Yes! Docker can run multiple containers simultaneously. Torbiz uses one 
+   container named "torbiz-petals-seeder".
 
-Q: How much disk space does Docker use?
+Q: How much disk space does this use?
 A: Docker image: ~2-3 GB
-   Model cache: Varies by model (5-20 GB typically)
+   Model cache: 5-50 GB depending on models you host
+   Logs: < 100 MB
+   Total: Usually 10-30 GB
 
 Q: Can I share GPU without Docker?
-A: Not on macOS. The dependency issues are too complex to solve without 
-   containerization. Docker is the clean, reliable solution.
+A: Not on macOS. The dependency issues (especially peft/accelerate) are too 
+   complex to solve reliably without containerization. Docker is the clean, 
+   maintainable solution.
 
 Q: What if I don't want to install Docker?
-A: You can still use direct inference (asking questions to models).
-   You just won't be able to share your GPU with the network.
+A: You can still use Torbiz for direct inference (asking questions to models 
+   hosted by others). You just won't be able to contribute your GPU to the network.
 
-Q: Is my data safe?
-A: Yes! Docker containers are isolated. Only the specified folders 
-   (scripts, model cache, logs) are accessible to the container.
+Q: Is my data safe with Docker?
+A: Yes! Docker containers are isolated. Only three specific directories are 
+   accessible to the container (scripts, model cache, logs). Your personal 
+   files are completely isolated.
+
+Q: Why CPU-only? Can't macOS use Metal GPU?
+A: Docker on macOS cannot access the host GPU (neither NVIDIA, AMD, nor Metal). 
+   This is a limitation of Docker Desktop on macOS. Direct inference CAN use 
+   Metal via system Python, but GPU sharing must use CPU in Docker.
+
+Q: My Mac has a powerful M2/M3 chip. Will CPU-only still work well?
+A: Yes! Apple Silicon chips have excellent CPU performance and can host 
+   smaller models efficiently. Try TinyLlama (1.1B) or Gemma (2B) first.
+
+Q: Can I host multiple models at once?
+A: No. One Docker container runs at a time. Stop sharing current model before 
+   starting a different one.
+
+Q: What happens if my Mac goes to sleep while sharing?
+A: The Docker container pauses. When your Mac wakes, the container resumes, 
+   but the P2P connection may need to reconnect. Best practice: disable sleep 
+   while sharing, or use an app like Amphetamine to keep Mac awake.
+
+Q: Do I need to leave Docker Desktop window open?
+A: No. Docker runs in the background. You only need the whale icon 🐳 in the 
+   menu bar (which means the Docker daemon is running).
 
 ================================================================================
 END OF GUIDE
 ================================================================================
 
-For more help, visit: https://docs.docker.com/desktop/mac/
-Or check Torbiz documentation at: [your documentation link]
+For more help:
+- Docker Desktop: https://docs.docker.com/desktop/mac/
+- Petals documentation: https://github.com/bigscience-workshop/petals
+- Torbiz support: [your support link]
 
+Last updated: November 2024
